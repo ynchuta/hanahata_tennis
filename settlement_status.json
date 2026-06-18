@@ -1,0 +1,22 @@
+[
+  {
+    "date": "2026-06-18",
+    "reserverName": "保護者A",
+    "status": "未精算"
+  },
+  {
+    "date": "2026-06-18",
+    "reserverName": "保護者B",
+    "status": "未精算"
+  },
+  {
+    "date": "2026-06-17",
+    "reserverName": "中田",
+    "status": "未精算"
+  },
+  {
+    "date": "2026-06-11",
+    "reserverName": "中田",
+    "status": "未精算"
+  }
+]
