@@ -1,20 +1,43 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getFacilities, getReservations, addReservation } from '@/lib/db';
+import { getFacilities, getReservations, addReservation, getReservers } from '@/lib/db';
 import { calculateFees } from '@/lib/calculator';
 import { syncSettlementStatusToGithub } from '@/lib/github';
 
 /**
- * 共通ヘルパー: 全予約から非公開情報を除外した精算状況を GitHub に同期する
+ * 全データをまとめて settlement_status.json に同期する
+ * 予約ステータス・施設マスタ・保護者マスタを含めるが、金額や口座情報は除外する
  */
 export async function syncToGithub() {
   try {
-    const reservations = await getReservations();
-    const publicData = reservations.map((r) => ({
-      date: r.date,
-      reserverName: r.reserverName,
-      status: r.status,
-    }));
-    await syncSettlementStatusToGithub(publicData);
+    const [reservations, facilities, reservers] = await Promise.all([
+      getReservations(),
+      getFacilities(),
+      getReservers(),
+    ]);
+
+    const publicData = {
+      updatedAt: new Date().toISOString(),
+      facilities: facilities.map((f) => ({
+        name: f.name,
+        allowChildRate: f.allowChildRate,
+      })),
+      reservers: reservers.map((r) => ({
+        name: r.name,
+      })),
+      reservations: reservations.map((r) => ({
+        date: r.date,
+        facilityName: r.facilityName,
+        reserverName: r.reserverName,
+        courtStartTime: r.courtStartTime,
+        courtEndTime: r.courtEndTime,
+        lightHours: r.lightHours,
+        feeType: r.feeType,
+        status: r.status,
+        // 金額・口座情報は公開しない
+      })),
+    };
+
+    await syncSettlementStatusToGithub(publicData as any);
   } catch (error) {
     console.error('Failed to auto-sync to GitHub:', error);
   }
@@ -39,50 +62,44 @@ export async function POST(req: NextRequest) {
       reserverName,
       courtStartTime,
       courtEndTime,
-      lightStartTime = '',
-      lightEndTime = '',
+      lightHours = 0,
       feeType,
+      memo = '',
     } = body;
 
-    // バリデーション
     if (!date || !facilityName || !reserverName || !courtStartTime || !courtEndTime || !feeType) {
       return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
     }
 
-    // 施設情報の取得
     const facilities = await getFacilities();
     const facility = facilities.find((f) => f.name === facilityName);
     if (!facility) {
       return NextResponse.json({ error: `Facility not found: ${facilityName}` }, { status: 400 });
     }
 
-    // 計算
     const { courtFee, lightFee, totalFee, appliedFeeType } = calculateFees({
       facility,
       feeType,
       courtStartTime,
       courtEndTime,
-      lightStartTime,
-      lightEndTime,
+      lightHours: Number(lightHours),
     });
 
-    // 保存
     const newRecord = await addReservation({
       date,
       facilityName,
       reserverName,
       courtStartTime,
       courtEndTime,
-      lightStartTime,
-      lightEndTime,
-      feeType: appliedFeeType, // 適用された料金種別（博多の森の制約を反映）
+      lightHours: Number(lightHours),
+      feeType: appliedFeeType,
       courtFee,
       lightFee,
       totalFee,
-      status: '未精算', // 新規登録時は未精算
+      memo,
+      status: '未精算',
     });
 
-    // GitHub 同期を実行
     await syncToGithub();
 
     return NextResponse.json(newRecord, { status: 201 });

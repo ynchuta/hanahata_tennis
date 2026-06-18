@@ -12,19 +12,19 @@ export type SettlementStatus = '未精算' | '精算済';
 
 export interface Reservation {
   id: string;
-  date: string; // YYYY-MM-DD
+  date: string;         // YYYY-MM-DD
   facilityName: string;
   reserverName: string;
   courtStartTime: string; // HH:MM
   courtEndTime: string;   // HH:MM
-  lightStartTime: string; // HH:MM (空文字可)
-  lightEndTime: string;   // HH:MM (空文字可)
+  lightHours: number;   // 照明利用時間 (時間単位: 0, 0.5, 1, 1.5, ...)
   feeType: FeeType;
   courtFee: number;
   lightFee: number;
   totalFee: number;
+  memo: string;         // 自由記入メモ
   status: SettlementStatus;
-  createdAt: string; // ISO String
+  createdAt: string;    // ISO String
 }
 
 export interface MonthlyReportRow {

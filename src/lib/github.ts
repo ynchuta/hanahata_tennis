@@ -17,15 +17,19 @@ export const USE_MOCK =
 const mockGithubOutputPath = path.join(process.cwd(), 'mock-data', 'settlement_status.json');
 
 export interface SettlementStatusPublic {
-  reserverName: string;
-  status: string;
+  updatedAt?: string;
+  facilities?: { name: string; allowChildRate: boolean }[];
+  reservers?: { name: string }[];
+  reservations?: object[];
+  // 旧形式との互換性のため any[]も許容
+  [key: string]: unknown;
 }
 
 /**
- * 精算ステータスのみを GitHub リポジトリ（またはモックのローカルファイル）に保存する
+ * 精算ステータス・施設・保護者情報を GitHub リポジトリ（またはモック）に保存する
  * 金額や口座情報などの個人情報は含まないように設計
  */
-export async function syncSettlementStatusToGithub(data: SettlementStatusPublic[]): Promise<boolean> {
+export async function syncSettlementStatusToGithub(data: SettlementStatusPublic | SettlementStatusPublic[]): Promise<boolean> {
   const contentStr = JSON.stringify(data, null, 2);
 
   if (USE_MOCK) {

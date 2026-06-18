@@ -564,3 +564,54 @@ input:checked + .slider:before {
   color: var(--color-text-muted);
   margin-top: 0.25rem;
 }
+
+/* カレンダー内の予約者名バッジ */
+.day-reserver-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  width: 100%;
+  margin-top: 2px;
+}
+
+.day-reserver-name {
+  font-size: 0.6rem;
+  font-weight: 600;
+  line-height: 1.2;
+  border-radius: 3px;
+  padding: 1px 3px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+  text-align: center;
+}
+
+.day-reserver-name.unsettled {
+  background: rgba(244, 63, 94, 0.2);
+  color: var(--color-accent);
+}
+
+.day-reserver-name.settled {
+  background: rgba(16, 185, 129, 0.2);
+  color: var(--color-success);
+}
+
+/* メモ表示スタイル */
+.reservation-memo {
+  font-size: 0.8rem;
+  color: var(--color-text-muted);
+  padding: 0.3rem 0.5rem;
+  background: rgba(255, 255, 255, 0.03);
+  border-left: 2px solid rgba(139, 92, 246, 0.4);
+  border-radius: 0 0.25rem 0.25rem 0;
+  margin-top: 0.25rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* カレンダー日付セルを縦方向に少し余裕を持たせる */
+.calendar-day {
+  min-height: 52px;
+}
+

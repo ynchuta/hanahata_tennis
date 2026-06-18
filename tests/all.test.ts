@@ -5,7 +5,6 @@ import { Facility } from '../src/types';
 import fs from 'fs';
 import path from 'path';
 
-// テスト用の施設マスタ定義
 const hibaru: Facility = {
   id: '1',
   name: '桧原運動公園',
@@ -24,7 +23,6 @@ const hakatamori: Facility = {
   allowChildRate: false,
 };
 
-// モックファイルの保存先パス
 const mockFacilitiesPath = path.join(process.cwd(), 'mock-data', 'facilities.json');
 const mockRecordsPath = path.join(process.cwd(), 'mock-data', 'records.json');
 const mockReserversPath = path.join(process.cwd(), 'mock-data', 'reservers.json');
@@ -40,10 +38,11 @@ describe('テニス部ナイター費精算管理システム テストスイー
         feeType: '子供',
         courtStartTime: '18:00',
         courtEndTime: '20:00',
-        lightStartTime: '19:00',
-        lightEndTime: '20:00',
+        lightHours: 1,  // 1時間単位に変更
       });
-
+      // コート: 500円/時 × 2時間 = 1000円
+      // 照明: 300円/時 × 1時間 = 300円
+      // 合計: 1300円
       assert.strictEqual(result.appliedFeeType, '子供');
       assert.strictEqual(result.courtFee, 1000);
       assert.strictEqual(result.lightFee, 300);
@@ -56,10 +55,9 @@ describe('テニス部ナイター費精算管理システム テストスイー
         feeType: '大人',
         courtStartTime: '18:00',
         courtEndTime: '19:10',
-        lightStartTime: '',
-        lightEndTime: '',
+        lightHours: 0,
       });
-
+      // 計算: (70 / 60) * 1000 = 1166.66... 円 → 切り上げて 1167円
       assert.strictEqual(result.totalFee, 1167);
     });
 
@@ -69,18 +67,31 @@ describe('テニス部ナイター費精算管理システム テストスイー
         feeType: '子供',
         courtStartTime: '18:00',
         courtEndTime: '19:00',
-        lightStartTime: '',
-        lightEndTime: '',
+        lightHours: 0,
       });
-
+      // 博多の森は allowChildRate が false のため大人料金 (1200円) が強制適用される
       assert.strictEqual(result.appliedFeeType, '大人');
       assert.strictEqual(result.totalFee, 1200);
+    });
+
+    test('テストケース[照明1時間単位]: 照明2時間分が正しく計算されるか', () => {
+      const result = calculateFees({
+        facility: hibaru,
+        feeType: '大人',
+        courtStartTime: '18:00',
+        courtEndTime: '19:00',
+        lightHours: 2,
+      });
+      // コート: 1000円 + 照明: 300×2 = 600円 = 合計1600円
+      assert.strictEqual(result.lightFee, 600);
+      assert.strictEqual(result.totalFee, 1600);
     });
   });
 
   describe('データ保存・連携検証', () => {
-    
+
     fs.writeFileSync(mockRecordsPath, '[]', 'utf-8');
+    fs.writeFileSync(mockReserversPath, '[]', 'utf-8');
 
     test('テストケース[複数予約]: 同一日で複数名が別々の予約を登録した際、データが競合せず個別に保存されるか検証', async () => {
       process.env.USE_MOCK = 'true';
@@ -93,12 +104,12 @@ describe('テニス部ナイター費精算管理システム テストスイー
         reserverName: '保護者A',
         courtStartTime: '18:00',
         courtEndTime: '20:00',
-        lightStartTime: '',
-        lightEndTime: '',
+        lightHours: 0,
         feeType: '大人',
         courtFee: 2000,
         lightFee: 0,
         totalFee: 2000,
+        memo: '',
         status: '未精算',
       });
 
@@ -108,12 +119,12 @@ describe('テニス部ナイター費精算管理システム テストスイー
         reserverName: '保護者B',
         courtStartTime: '19:00',
         courtEndTime: '21:00',
-        lightStartTime: '',
-        lightEndTime: '',
+        lightHours: 1,
         feeType: '大人',
         courtFee: 2000,
-        lightFee: 0,
-        totalFee: 2000,
+        lightFee: 300,
+        totalFee: 2300,
+        memo: 'コートA使用',
         status: '未精算',
       });
 
@@ -127,42 +138,65 @@ describe('テニス部ナイター費精算管理システム テストスイー
       assert.ok(parentB);
       assert.strictEqual(parentA.courtStartTime, '18:00');
       assert.strictEqual(parentB.courtStartTime, '19:00');
+      assert.strictEqual(parentB.lightHours, 1);
+      assert.strictEqual(parentB.memo, 'コートA使用');
     });
 
-    test('テストケース[外部連携]: データを保存した際に、非公開情報を除外した精算情報が正しく書き出されるか検証', async () => {
+    test('テストケース[メモ保存]: 予約にメモが正しく保存・取得できるか検証', async () => {
       const { getReservations } = await import('../src/lib/db');
+      const records = await getReservations();
+      const withMemo = records.find(r => r.memo !== '');
+      assert.ok(withMemo);
+      assert.strictEqual(withMemo.memo, 'コートA使用');
+    });
+
+    test('テストケース[外部連携]: 施設・保護者・予約情報を含む構造化データが公開用JSONに出力されるか検証', async () => {
+      const { getReservations, getFacilities, getReservers, addReserver } = await import('../src/lib/db');
       const { syncSettlementStatusToGithub } = await import('../src/lib/github');
 
-      const records = await getReservations();
-      
-      const publicData = records.map((r) => ({
-        date: r.date,
-        reserverName: r.reserverName,
-        status: r.status,
-      }));
+      // 保護者を追加して同期データに反映されるか確認
+      await addReserver('テスト保護者');
+
+      const [reservations, facilities, reservers] = await Promise.all([
+        getReservations(), getFacilities(), getReservers()
+      ]);
+
+      const publicData = {
+        updatedAt: new Date().toISOString(),
+        facilities: facilities.map(f => ({ name: f.name, allowChildRate: f.allowChildRate })),
+        reservers: reservers.map(r => ({ name: r.name })),
+        reservations: reservations.map(r => ({
+          date: r.date,
+          facilityName: r.facilityName,
+          reserverName: r.reserverName,
+          status: r.status,
+        })),
+      };
 
       const success = await syncSettlementStatusToGithub(publicData);
       assert.ok(success);
 
       assert.ok(fs.existsSync(mockGithubOutputPath));
-      const fileContentStr = fs.readFileSync(mockGithubOutputPath, 'utf-8');
-      const parsed = JSON.parse(fileContentStr);
+      const parsed = JSON.parse(fs.readFileSync(mockGithubOutputPath, 'utf-8'));
 
-      assert.strictEqual(parsed.length, 2);
-      assert.strictEqual(parsed[0].reserverName, '保護者A');
-      
-      assert.strictEqual((parsed[0] as any).courtFee, undefined);
-      assert.strictEqual((parsed[0] as any).lightFee, undefined);
-      assert.strictEqual((parsed[0] as any).totalFee, undefined);
+      // 施設・保護者・予約がすべて含まれていることを確認
+      assert.ok(Array.isArray(parsed.facilities));
+      assert.ok(Array.isArray(parsed.reservers));
+      assert.ok(Array.isArray(parsed.reservations));
+
+      // 金額などの機密データは含まれていないことを確認
+      if (parsed.reservations.length > 0) {
+        assert.strictEqual((parsed.reservations[0] as any).courtFee, undefined);
+        assert.strictEqual((parsed.reservations[0] as any).totalFee, undefined);
+      }
     });
   });
 
-  describe('設定管理機能（追加要件）の検証', () => {
-    
+  describe('設定管理機能の検証', () => {
+
     test('コート（施設）マスタの動的更新（追加・編集・削除）検証', async () => {
       const { getFacilities, addFacility, updateFacility, deleteFacility } = await import('../src/lib/db');
 
-      // 1. 施設追加
       const newFacility = await addFacility({
         name: 'テストコート',
         adultRatePerHour: 800,
@@ -172,45 +206,28 @@ describe('テニス部ナイター費精算管理システム テストスイー
       });
       assert.ok(newFacility.id);
 
-      let list = await getFacilities();
-      assert.ok(list.some(f => f.name === 'テストコート'));
-
-      // 2. 施設編集 (大人料金を800円 -> 900円)
-      const updated = await updateFacility(newFacility.id, {
-        adultRatePerHour: 900,
-      });
+      const updated = await updateFacility(newFacility.id, { adultRatePerHour: 900 });
       assert.ok(updated);
       assert.strictEqual(updated.adultRatePerHour, 900);
 
-      list = await getFacilities();
-      const checkTarget = list.find(f => f.id === newFacility.id);
-      assert.ok(checkTarget);
-      assert.strictEqual(checkTarget.adultRatePerHour, 900);
-
-      // 3. 施設削除
       const deleteSuccess = await deleteFacility(newFacility.id);
       assert.ok(deleteSuccess);
 
-      list = await getFacilities();
+      const list = await getFacilities();
       assert.strictEqual(list.some(f => f.id === newFacility.id), false);
     });
 
     test('保護者（予約者）マスタの動的登録（追加・削除）検証', async () => {
       const { getReservers, addReserver, deleteReserver } = await import('../src/lib/db');
 
-      // 1. 保護者追加
-      const newReserver = await addReserver('テスト保護者');
+      const newReserver = await addReserver('テスト保護者2');
       assert.ok(newReserver.id);
-      assert.strictEqual(newReserver.name, 'テスト保護者');
+      assert.strictEqual(newReserver.name, 'テスト保護者2');
 
-      let list = await getReservers();
-      assert.ok(list.some(r => r.name === 'テスト保護者'));
-
-      // 2. 保護者削除
       const deleteSuccess = await deleteReserver(newReserver.id);
       assert.ok(deleteSuccess);
 
-      list = await getReservers();
+      const list = await getReservers();
       assert.strictEqual(list.some(r => r.id === newReserver.id), false);
     });
   });

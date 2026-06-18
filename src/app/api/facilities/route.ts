@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getFacilities, addFacility, updateFacility, deleteFacility } from '@/lib/db';
+import { syncToGithub } from '../records/route';
 
 export async function GET() {
   try {
@@ -28,6 +29,7 @@ export async function POST(req: NextRequest) {
       allowChildRate: !!allowChildRate,
     });
 
+    await syncToGithub();
     return NextResponse.json(newFacility, { status: 201 });
   } catch (error) {
     console.error('API Error (facilities POST):', error);
@@ -56,6 +58,7 @@ export async function PUT(req: NextRequest) {
       return NextResponse.json({ error: 'Facility not found' }, { status: 404 });
     }
 
+    await syncToGithub();
     return NextResponse.json(updated);
   } catch (error) {
     console.error('API Error (facilities PUT):', error);
@@ -74,6 +77,7 @@ export async function DELETE(req: NextRequest) {
     if (!success) {
       return NextResponse.json({ error: 'Facility not found' }, { status: 404 });
     }
+    await syncToGithub();
     return NextResponse.json({ success: true });
   } catch (error) {
     console.error('API Error (facilities DELETE):', error);
