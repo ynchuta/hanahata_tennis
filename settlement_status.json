@@ -1,20 +1,18 @@
 {
-  "updatedAt": "2026-06-18T10:08:59.608Z",
+  "updatedAt": "2026-06-18T12:09:29.712Z",
   "facilities": [
     {
       "name": "桧原運動公園",
       "allowChildRate": true
+    },
+    {
+      "name": "博多の森",
+      "allowChildRate": false
     }
   ],
   "reservers": [
     {
-      "name": "中田"
-    },
-    {
-      "name": "新宅"
-    },
-    {
-      "name": "楢崎"
+      "name": "テスト保護者"
     }
   ],
   "reservations": [
@@ -42,26 +40,6 @@
       "date": "2026-06-19",
       "facilityName": "桧原運動公園",
       "reserverName": "テスト保護者",
-      "courtStartTime": "18:00",
-      "courtEndTime": "20:00",
-      "lightHours": 0,
-      "feeType": "大人",
-      "status": "未精算"
-    },
-    {
-      "date": "2026-06-17",
-      "facilityName": "桧原運動公園",
-      "reserverName": "テスト保護者",
-      "courtStartTime": "18:00",
-      "courtEndTime": "20:00",
-      "lightHours": 0,
-      "feeType": "子供",
-      "status": "未精算"
-    },
-    {
-      "date": "2026-06-17",
-      "facilityName": "桧原運動公園",
-      "reserverName": "新宅",
       "courtStartTime": "18:00",
       "courtEndTime": "20:00",
       "lightHours": 0,
