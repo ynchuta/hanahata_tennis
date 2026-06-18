@@ -1,0 +1,18 @@
+[
+  {
+    "id": "1",
+    "name": "桧原運動公園",
+    "adultRatePerHour": 1000,
+    "childRatePerHour": 500,
+    "lightRatePerHour": 300,
+    "allowChildRate": true
+  },
+  {
+    "id": "2",
+    "name": "博多の森",
+    "adultRatePerHour": 1200,
+    "childRatePerHour": 1200,
+    "lightRatePerHour": 400,
+    "allowChildRate": false
+  }
+]
