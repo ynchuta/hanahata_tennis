@@ -1,13 +1,9 @@
 {
-  "updatedAt": "2026-06-18T09:18:22.142Z",
+  "updatedAt": "2026-06-18T10:05:59.850Z",
   "facilities": [
     {
       "name": "桧原運動公園",
       "allowChildRate": true
-    },
-    {
-      "name": "博多の森",
-      "allowChildRate": false
     }
   ],
   "reservers": [
