@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-06-18T10:06:24.497Z",
+  "updatedAt": "2026-06-18T10:06:31.090Z",
   "facilities": [
     {
       "name": "桧原運動公園",
@@ -9,6 +9,9 @@
   "reservers": [
     {
       "name": "中田"
+    },
+    {
+      "name": "新宅"
     }
   ],
   "reservations": [
