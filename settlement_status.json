@@ -1,6 +1,11 @@
 {
-  "updatedAt": "2026-06-18T10:07:43.058Z",
-  "facilities": [],
+  "updatedAt": "2026-06-18T10:07:59.828Z",
+  "facilities": [
+    {
+      "name": "桧原運動公園",
+      "allowChildRate": true
+    }
+  ],
   "reservers": [
     {
       "name": "中田"
