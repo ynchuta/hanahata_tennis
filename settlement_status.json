@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-06-18T10:07:59.828Z",
+  "updatedAt": "2026-06-18T10:08:30.588Z",
   "facilities": [
     {
       "name": "桧原運動公園",
@@ -46,6 +46,16 @@
       "courtEndTime": "20:00",
       "lightHours": 0,
       "feeType": "大人",
+      "status": "未精算"
+    },
+    {
+      "date": "2026-06-17",
+      "facilityName": "桧原運動公園",
+      "reserverName": "テスト保護者",
+      "courtStartTime": "18:00",
+      "courtEndTime": "20:00",
+      "lightHours": 0,
+      "feeType": "子供",
       "status": "未精算"
     }
   ]
