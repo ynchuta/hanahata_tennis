@@ -1,4 +1,5 @@
 import { createClient } from '@vercel/kv';
+import Redis from 'ioredis';
 import { Facility, Reservation, SettlementStatus } from '../types';
 import fs from 'fs';
 import path from 'path';
@@ -12,11 +13,8 @@ const KV_REST_API_TOKEN = process.env.KV_REST_API_TOKEN;
 export const USE_MOCK = !KV_REDIS_URL && !KV_REST_API_URL;
 
 // KV クライアントを初期化する
-// 優先順位: ① KV_REST_API_URL + KV_REST_API_TOKEN (Vercel KV 標準)
-//           ② KV_REDIS_URL (redis:// / rediss:// 形式 → REST URL に変換)
-//           ③ KV_REDIS_URL (https:// 形式)
 function initKVClient() {
-  // ① Vercel KV 標準環境変数を優先する
+  // ① Vercel KV 標準環境変数 (REST) を優先する
   if (KV_REST_API_URL && KV_REST_API_TOKEN) {
     try {
       return createClient({
@@ -25,7 +23,6 @@ function initKVClient() {
       });
     } catch (error) {
       console.error('Error initializing KV client from KV_REST_API_URL:', error);
-      return null;
     }
   }
 
@@ -33,13 +30,43 @@ function initKVClient() {
   if (!KV_REDIS_URL) return null;
   try {
     if (KV_REDIS_URL.startsWith('redis://') || KV_REDIS_URL.startsWith('rediss://')) {
-      const urlObj = new URL(KV_REDIS_URL);
-      const token = urlObj.password || urlObj.username || '';
-      // Upstash の REST API URL は https://<hostname> のみ（サフィックス変換は不要）
-      const restUrl = `https://${urlObj.hostname}`;
-      return createClient({ url: restUrl, token });
+      // TCP 接続用の通常の Redis (または Upstash Redis への TCP 接続)
+      // ioredis を使用して接続する
+      const redisClient = new Redis(KV_REDIS_URL, {
+        maxRetriesPerRequest: 1, // サーバーレス環境でのハングアップを避けるための設定
+        connectTimeout: 5000,
+      });
+
+      // エラーイベントハンドラを登録（接続エラー等でプロセスがクラッシュするのを防ぐ）
+      redisClient.on('error', (err) => {
+        console.error('ioredis client connection error:', err);
+      });
+
+      // @vercel/kv のインターフェース (get, set) と互換性のあるラッパーオブジェクトを返す
+      return {
+        get: async <T>(key: string): Promise<T | null> => {
+          try {
+            const val = await redisClient.get(key);
+            if (val === null) return null;
+            return JSON.parse(val) as T;
+          } catch (e) {
+            console.error(`ioredis.get error for key ${key}:`, e);
+            throw e;
+          }
+        },
+        set: async (key: string, value: unknown): Promise<'OK'> => {
+          try {
+            const str = typeof value === 'string' ? value : JSON.stringify(value);
+            await redisClient.set(key, str);
+            return 'OK';
+          } catch (e) {
+            console.error(`ioredis.set error for key ${key}:`, e);
+            throw e;
+          }
+        }
+      };
     } else {
-      // すでに https:// 形式
+      // すでに https:// 形式 (Upstash REST API など)
       return createClient({
         url: KV_REDIS_URL,
         token: KV_REST_API_TOKEN || '',
@@ -732,5 +759,17 @@ export async function deleteReservation(id: string): Promise<boolean> {
     if (list.length === filtered.length) return false;
     writeMockData(mockRecordsPath, filtered);
     return true;
+  }
+}
+
+export async function testKVConnection(): Promise<boolean> {
+  if (USE_MOCK || !kv) return false;
+  try {
+    // 疎通確認として 'nighter:ping' を get してみる
+    await kv.get('nighter:ping');
+    return true;
+  } catch (error) {
+    console.error('KV Connection test failed:', error);
+    return false;
   }
 }
