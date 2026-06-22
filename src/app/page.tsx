@@ -236,6 +236,41 @@ export default function Home() {
     }
   };
 
+  const handleToggleBulkStatus = async (reserverName: string, currentStatus: string) => {
+    const nextStatus = currentStatus === '未精算' ? '精算済' : '未精算';
+    // 楽観的 UI アップデート（該当月と保護者名の予約レコードを即座に書き換える）
+    setReservations((prev) =>
+      prev.map((r) =>
+        (r.date.startsWith(reportMonth) && r.reserverName === reserverName)
+          ? { ...r, status: nextStatus }
+          : r
+      )
+    );
+    showToast('一括更新中...', 0, true);
+    try {
+      const res = await fetch('/api/summary', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          month: reportMonth,
+          reserverName,
+          status: nextStatus,
+        }),
+      });
+      if (res.ok) {
+        await fetchReservations();
+        showToast('一括精算ステータスを更新しました！');
+      } else {
+        await fetchReservations();
+        showToast('一括更新に失敗しました');
+      }
+    } catch (err) {
+      console.error(err);
+      await fetchReservations();
+      showToast('通信エラーが発生しました');
+    }
+  };
+
   // 予約の削除処理
   const handleDeleteReservation = async (id: string) => {
     if (!confirm('本当にこの予約を物理削除しますか？\nこの操作は取り消せません。')) return;
@@ -546,7 +581,6 @@ export default function Home() {
                       key={idx}
                       onClick={() => setSelectedDateStr(dayStr)}
                       className={`calendar-day ${isCurrentMonth ? '' : 'outside'} ${isSelected ? 'selected' : ''} ${isToday ? 'today' : ''}`}
-                      style={{ flexDirection: 'column', alignItems: 'stretch', padding: '4px' }}
                     >
                       <span className="day-number" style={{ textAlign: 'right', fontSize: '0.85rem' }}>
                         {day.getDate()}
@@ -805,13 +839,23 @@ export default function Home() {
                           <span className="accordion-arrow">▼</span>
                           <span style={{ fontWeight: 600 }}>{parent.reserverName}</span>
                         </div>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }} onClick={(e) => e.stopPropagation()}>
                           <span style={{ fontWeight: 700, color: 'var(--color-secondary)' }}>
                             {parent.totalAmount.toLocaleString()}円
                           </span>
-                          <span className={`status-badge ${parent.status === '精算済' ? 'settled' : 'unsettled'}`}>
-                            {parent.status}
-                          </span>
+                          <div className="settlement-checkbox-wrapper">
+                            <span className={`status-badge ${parent.status === '精算済' ? 'settled' : 'unsettled'}`}>
+                              {parent.status}
+                            </span>
+                            <label className="switch">
+                              <input
+                                type="checkbox"
+                                checked={parent.status === '精算済'}
+                                onChange={() => handleToggleBulkStatus(parent.reserverName, parent.status)}
+                              />
+                              <span className="slider"></span>
+                            </label>
+                          </div>
                         </div>
                       </div>
 

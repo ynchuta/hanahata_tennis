@@ -47,3 +47,26 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
   }
 }
+
+export async function POST(req: NextRequest) {
+  try {
+    const body = await req.json();
+    const { month, reserverName, status } = body;
+
+    if (!month || !reserverName || !status) {
+      return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
+    }
+
+    if (status !== '未精算' && status !== '精算済') {
+      return NextResponse.json({ error: 'Invalid status value' }, { status: 400 });
+    }
+
+    const { updateReservationsStatusByReserverMonth } = await import('@/lib/db');
+    const count = await updateReservationsStatusByReserverMonth(month, reserverName, status);
+
+    return NextResponse.json({ success: true, updatedCount: count });
+  } catch (error) {
+    console.error('API Error (summary POST):', error);
+    return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
+  }
+}

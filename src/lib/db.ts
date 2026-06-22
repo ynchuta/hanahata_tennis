@@ -773,3 +773,59 @@ export async function testKVConnection(): Promise<boolean> {
     return false;
   }
 }
+
+export async function updateReservationsStatusByReserverMonth(
+  month: string,
+  reserverName: string,
+  status: SettlementStatus
+): Promise<number> {
+  if (USE_MOCK) {
+    const list = readMockData<KVReservation>(mockRecordsPath);
+    let count = 0;
+    for (const r of list) {
+      if (r.d.startsWith(month) && r.rn === reserverName) {
+        if (r.s !== status) {
+          r.s = status;
+          count++;
+        }
+      }
+    }
+    if (count > 0) {
+      writeMockData(mockRecordsPath, list);
+    }
+    return count;
+  }
+
+  try {
+    const list = (await kv!.get<KVReservation[]>('nighter:recs')) || [];
+    let count = 0;
+    for (const r of list) {
+      if (r.d.startsWith(month) && r.rn === reserverName) {
+        if (r.s !== status) {
+          r.s = status;
+          count++;
+        }
+      }
+    }
+    if (count > 0) {
+      await kv!.set('nighter:recs', list);
+    }
+    return count;
+  } catch (error) {
+    console.error('Redis Error (updateReservationsStatusByReserverMonth), falling back to mock:', error);
+    const list = readMockData<KVReservation>(mockRecordsPath);
+    let count = 0;
+    for (const r of list) {
+      if (r.d.startsWith(month) && r.rn === reserverName) {
+        if (r.s !== status) {
+          r.s = status;
+          count++;
+        }
+      }
+    }
+    if (count > 0) {
+      writeMockData(mockRecordsPath, list);
+    }
+    return count;
+  }
+}
