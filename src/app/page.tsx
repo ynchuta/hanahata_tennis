@@ -46,6 +46,7 @@ export default function Home() {
     courtStartTime: '18:00',
     courtEndTime: '20:00',
     lightHours: 0,
+    lightStartTime: '',
     feeType: '大人' as FeeType,
     memo: '',
   });
@@ -57,6 +58,7 @@ export default function Home() {
     childRatePerHour: 500,
     lightRatePerHour: 300,
     allowChildRate: true,
+    defaultLightStartTime: '',
   });
   const [isEditingFacility, setIsEditingFacility] = useState(false);
   const [newReserverName, setNewReserverName] = useState('');
@@ -218,10 +220,13 @@ export default function Home() {
         setEditingReservationId(null);
         setFormData((prev) => {
           const currentFacility = facilities.find((f) => f.name === prev.facilityName);
+          const defaultLightStart = currentFacility?.defaultLightStartTime || '';
+          const calculatedHours = calculateLightHours(prev.courtStartTime, prev.courtEndTime, defaultLightStart);
           return {
             ...prev,
             // courtStartTime と courtEndTime は次回連続入力のためにクリアせず保持する
-            lightHours: 0,
+            lightStartTime: defaultLightStart,
+            lightHours: calculatedHours,
             memo: '',
             feeType: (currentFacility && currentFacility.allowChildRate) ? '子供' : '大人',
           };
@@ -245,6 +250,7 @@ export default function Home() {
       courtStartTime: r.courtStartTime,
       courtEndTime: r.courtEndTime,
       lightHours: r.lightHours,
+      lightStartTime: r.lightStartTime || '',
       feeType: r.feeType,
       memo: r.memo,
     });
@@ -351,7 +357,7 @@ export default function Home() {
           setFacilities((prev) => [...prev, saved]);
           if (!formData.facilityName) setFormData((prev) => ({ ...prev, facilityName: saved.name }));
         }
-        setFacilityForm({ id: '', name: '', adultRatePerHour: 1000, childRatePerHour: 500, lightRatePerHour: 300, allowChildRate: true });
+        setFacilityForm({ id: '', name: '', adultRatePerHour: 1000, childRatePerHour: 500, lightRatePerHour: 300, allowChildRate: true, defaultLightStartTime: '' });
         showToast('施設設定を保存しました');
       } else {
         const err = await res.json();
@@ -423,13 +429,46 @@ export default function Home() {
     }
   };
 
+  // 時間差分から照明時間を計算するヘルパー（1時間単位）
+  const calculateLightHours = (courtStart: string, courtEnd: string, lightStart: string): number => {
+    if (!lightStart || !courtStart || !courtEnd) return 0;
+    
+    const parseToMin = (timeStr: string) => {
+      const [h, m] = timeStr.split(':').map(Number);
+      return h * 60 + m;
+    };
+    
+    const cStart = parseToMin(courtStart);
+    let cEnd = parseToMin(courtEnd);
+    let lStart = parseToMin(lightStart);
+    
+    // 日をまたぐコート時間の調整
+    if (cEnd < cStart) cEnd += 24 * 60;
+    
+    // 照明開始時間がコート開始より前なら、コート開始時間から点灯とみなす
+    // 照明開始時間がコート終了より後なら、点灯なし
+    if (lStart < cStart) {
+      lStart = cStart;
+    }
+    if (lStart >= cEnd) return 0;
+    
+    const diffMin = cEnd - lStart;
+    return Math.max(0, Math.ceil(diffMin / 60)); // 1時間単位に切り上げ
+  };
+
   const handleFacilityChange = (name: string) => {
     const facility = facilities.find((f) => f.name === name);
-    setFormData((prev) => ({
-      ...prev,
-      facilityName: name,
-      feeType: (facility && facility.allowChildRate) ? '子供' : '大人',
-    }));
+    const defaultLightStart = facility?.defaultLightStartTime || '';
+    setFormData((prev) => {
+      const calculatedHours = calculateLightHours(prev.courtStartTime, prev.courtEndTime, defaultLightStart);
+      return {
+        ...prev,
+        facilityName: name,
+        feeType: (facility && facility.allowChildRate) ? '子供' : '大人',
+        lightStartTime: defaultLightStart,
+        lightHours: calculatedHours,
+      };
+    });
   };
 
   const toggleAccordion = (key: string) => {
@@ -495,11 +534,9 @@ export default function Home() {
         const durationLabel = Number.isInteger(durationHours) ? `${durationHours}時間` : `${durationHours}時間`;
 
         text += `\n■${dateLabel} (${r.facilityName})\n`;
-        text += `予約者: ${r.reserverName}さん\n`;
         text += `コート代: ${durationLabel} (${r.feeType}料金) = ${r.courtFee.toLocaleString()}円\n`;
         if (r.lightHours > 0) {
-          const lightMinutes = r.lightHours * 60;
-          text += `照明代: ${lightMinutes}分 = ${r.lightFee.toLocaleString()}円\n`;
+          text += `照明代: ${r.lightHours}時間 = ${r.lightFee.toLocaleString()}円\n`;
         }
         text += `【小計: ${r.totalFee.toLocaleString()}円】\n`;
       }
@@ -767,35 +804,76 @@ export default function Home() {
                 <div className="form-row">
                   <div className="form-group">
                     <label className="form-label">コート利用開始</label>
-                    <input type="time" className="form-input" required value={formData.courtStartTime} onChange={(e) => setFormData((prev) => ({ ...prev, courtStartTime: e.target.value }))} />
+                    <input
+                      type="time"
+                      className="form-input"
+                      required
+                      value={formData.courtStartTime}
+                      onChange={(e) => {
+                        const start = e.target.value;
+                        setFormData((prev) => {
+                          const calculatedHours = calculateLightHours(start, prev.courtEndTime, prev.lightStartTime);
+                          return { ...prev, courtStartTime: start, lightHours: calculatedHours };
+                        });
+                      }}
+                    />
                   </div>
                   <div className="form-group">
                     <label className="form-label">コート利用終了</label>
-                    <input type="time" className="form-input" required value={formData.courtEndTime} onChange={(e) => setFormData((prev) => ({ ...prev, courtEndTime: e.target.value }))} />
+                    <input
+                      type="time"
+                      className="form-input"
+                      required
+                      value={formData.courtEndTime}
+                      onChange={(e) => {
+                        const end = e.target.value;
+                        setFormData((prev) => {
+                          const calculatedHours = calculateLightHours(prev.courtStartTime, end, prev.lightStartTime);
+                          return { ...prev, courtEndTime: end, lightHours: calculatedHours };
+                        });
+                      }}
+                    />
                   </div>
                 </div>
 
-                {/* 照明利用時間（1時間単位の数値選択） */}
-                <div className="form-group">
-                  <label className="form-label">
-                    照明利用時間
+                {/* 照明利用開始時間 */}
+                <div className="form-row">
+                  <div className="form-group">
+                    <label className="form-label">
+                      照明利用開始時間 (任意)
+                    </label>
+                    <input
+                      type="time"
+                      className="form-input"
+                      value={formData.lightStartTime}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setFormData((prev) => {
+                          const calculatedHours = calculateLightHours(prev.courtStartTime, prev.courtEndTime, val);
+                          return { ...prev, lightStartTime: val, lightHours: calculatedHours };
+                        });
+                      }}
+                    />
+                    <p className="help-text">※未入力で照明利用なしになります。</p>
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">
+                      照明利用時間 (自動計算)
+                    </label>
+                    <input
+                      type="text"
+                      className="form-input"
+                      readOnly
+                      disabled
+                      style={{ background: 'rgba(255, 255, 255, 0.02)', color: 'var(--color-secondary)' }}
+                      value={formData.lightHours > 0 ? `${formData.lightHours}時間` : '照明なし'}
+                    />
                     {selectedFacilityObj && formData.lightHours > 0 && (
-                      <span style={{ marginLeft: '0.5rem', color: 'var(--color-secondary)', fontWeight: 400 }}>
-                        （照明代: {(formData.lightHours * selectedFacilityObj.lightRatePerHour).toLocaleString()}円）
-                      </span>
+                      <p className="help-text" style={{ color: 'var(--color-secondary)' }}>
+                        照明代: {(formData.lightHours * selectedFacilityObj.lightRatePerHour).toLocaleString()}円
+                      </p>
                     )}
-                  </label>
-                  <select
-                    className="form-select"
-                    value={formData.lightHours}
-                    onChange={(e) => setFormData((prev) => ({ ...prev, lightHours: Number(e.target.value) }))}
-                  >
-                    {lightHoursOptions.map((h) => (
-                      <option key={h} value={h}>
-                        {h === 0 ? '照明なし' : `${h}時間`}
-                      </option>
-                    ))}
-                  </select>
+                  </div>
                 </div>
 
                 {/* メモ */}
@@ -892,7 +970,11 @@ export default function Home() {
 
                     <div className="reservation-time-details">
                       <div>コート時間: {r.courtStartTime} 〜 {r.courtEndTime}</div>
-                      {r.lightHours > 0 && <div>照明: {r.lightHours}時間</div>}
+                      {r.lightHours > 0 && (
+                        <div>
+                          照明: {r.lightHours}時間 (点灯開始: {r.lightStartTime || '設定なし'})
+                        </div>
+                      )}
                     </div>
 
                     <div className="reservation-fees">
@@ -993,7 +1075,7 @@ export default function Home() {
                                     </div>
                                     <div style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)', marginTop: '0.2' }}>
                                       {r.courtStartTime}〜{r.courtEndTime}
-                                      {r.lightHours > 0 && ` | 照明${r.lightHours}時間`}
+                                      {r.lightHours > 0 && ` | 照明${r.lightHours}時間 (${r.lightStartTime || ''}〜)`}
                                       {' | '}{r.feeType}
                                     </div>
                                     {r.memo && (
@@ -1074,27 +1156,32 @@ export default function Home() {
                   <label className="form-label">照明料金 (1時間)</label>
                   <input type="number" className="form-input" required min="0" value={facilityForm.lightRatePerHour} onChange={(e) => setFacilityForm((prev) => ({ ...prev, lightRatePerHour: Number(e.target.value) }))} />
                 </div>
-                <div className="form-group" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
-                  <label className="form-label" style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', marginTop: '1.25rem' }}>
-                    <input
-                      type="checkbox"
-                      checked={facilityForm.allowChildRate}
-                      onChange={(e) => setFacilityForm((prev) => ({
-                        ...prev,
-                        allowChildRate: e.target.checked,
-                        childRatePerHour: e.target.checked ? prev.childRatePerHour : prev.adultRatePerHour,
-                      }))}
-                    />
-                    子供料金の選択を許可する
-                  </label>
+                <div className="form-group">
+                  <label className="form-label">デフォルト照明利用開始時間</label>
+                  <input type="time" className="form-input" value={facilityForm.defaultLightStartTime} onChange={(e) => setFacilityForm((prev) => ({ ...prev, defaultLightStartTime: e.target.value }))} />
                 </div>
+              </div>
+
+              <div className="form-group">
+                <label className="form-label" style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', marginTop: '0.5rem' }}>
+                  <input
+                    type="checkbox"
+                    checked={facilityForm.allowChildRate}
+                    onChange={(e) => setFacilityForm((prev) => ({
+                      ...prev,
+                      allowChildRate: e.target.checked,
+                      childRatePerHour: e.target.checked ? prev.childRatePerHour : prev.adultRatePerHour,
+                    }))}
+                  />
+                  子供料金の選択を許可する
+                </label>
               </div>
 
               <div className="form-row" style={{ marginTop: '1rem' }}>
                 <button type="button" className="btn btn-secondary" onClick={() => {
                     setIsEditingFacility(false);
                     setIsFacilityFormOpen(false);
-                    setFacilityForm({ id: '', name: '', adultRatePerHour: 1000, childRatePerHour: 500, lightRatePerHour: 300, allowChildRate: true });
+                    setFacilityForm({ id: '', name: '', adultRatePerHour: 1000, childRatePerHour: 500, lightRatePerHour: 300, allowChildRate: true, defaultLightStartTime: '' });
                   }}>閉じる</button>
                 <button type="submit" className="btn btn-primary">{isEditingFacility ? '更新する' : '追加する'}</button>
               </div>
@@ -1126,7 +1213,15 @@ export default function Home() {
                             onClick={() => {
                               setIsEditingFacility(true);
                               setIsFacilityFormOpen(true);
-                              setFacilityForm({ id: f.id, name: f.name, adultRatePerHour: f.adultRatePerHour, childRatePerHour: f.childRatePerHour, lightRatePerHour: f.lightRatePerHour, allowChildRate: f.allowChildRate });
+                              setFacilityForm({
+                                id: f.id,
+                                name: f.name,
+                                adultRatePerHour: f.adultRatePerHour,
+                                childRatePerHour: f.childRatePerHour,
+                                lightRatePerHour: f.lightRatePerHour,
+                                allowChildRate: f.allowChildRate,
+                                defaultLightStartTime: f.defaultLightStartTime || '',
+                              });
                             }}
                           >編集</button>
                           <button

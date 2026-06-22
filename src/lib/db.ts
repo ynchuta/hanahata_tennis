@@ -92,6 +92,7 @@ interface KVFacility {
   c: number;   // childRatePerHour
   l: number;   // lightRatePerHour
   ac: boolean; // allowChildRate
+  lst?: string; // defaultLightStartTime (HH:MM)
 }
 
 export interface Reserver {
@@ -118,6 +119,7 @@ interface KVReservation {
   m: string;   // memo
   s: '未精算' | '精算済'; // status
   ca: string;  // createdAt
+  lst?: string; // lightStartTime (HH:MM)
 }
 
 interface OldFacility {
@@ -127,6 +129,7 @@ interface OldFacility {
   childRatePerHour: number;
   lightRatePerHour: number;
   allowChildRate: boolean;
+  defaultLightStartTime?: string;
 }
 
 interface OldReserver {
@@ -147,6 +150,7 @@ interface OldReservation {
   memo?: string;
   status?: '未精算' | '精算済';
   createdAt?: string;
+  lightStartTime?: string;
 }
 
 // 既存モックデータのマイグレーション処理
@@ -303,6 +307,7 @@ export async function getFacilities(): Promise<Facility[]> {
     childRatePerHour: f.c,
     lightRatePerHour: f.l,
     allowChildRate: f.ac,
+    defaultLightStartTime: f.lst,
   }));
 }
 
@@ -318,6 +323,7 @@ export async function addFacility(facility: Omit<Facility, 'id'>): Promise<Facil
     c: newFacility.childRatePerHour,
     l: newFacility.lightRatePerHour,
     ac: newFacility.allowChildRate,
+    lst: newFacility.defaultLightStartTime,
   };
 
   if (USE_MOCK) {
@@ -355,6 +361,7 @@ export async function updateFacility(id: string, facility: Partial<Omit<Facility
         c: facility.childRatePerHour !== undefined ? facility.childRatePerHour : current.c,
         l: facility.lightRatePerHour !== undefined ? facility.lightRatePerHour : current.l,
         ac: facility.allowChildRate !== undefined ? facility.allowChildRate : current.ac,
+        lst: facility.defaultLightStartTime !== undefined ? facility.defaultLightStartTime : current.lst,
       };
       writeMockData(mockFacilitiesPath, list);
       updatedFacility = {
@@ -364,6 +371,7 @@ export async function updateFacility(id: string, facility: Partial<Omit<Facility
         childRatePerHour: list[index].c,
         lightRatePerHour: list[index].l,
         allowChildRate: list[index].ac,
+        defaultLightStartTime: list[index].lst,
       };
     }
   } else {
@@ -379,6 +387,7 @@ export async function updateFacility(id: string, facility: Partial<Omit<Facility
           c: facility.childRatePerHour !== undefined ? facility.childRatePerHour : current.c,
           l: facility.lightRatePerHour !== undefined ? facility.lightRatePerHour : current.l,
           ac: facility.allowChildRate !== undefined ? facility.allowChildRate : current.ac,
+          lst: facility.defaultLightStartTime !== undefined ? facility.defaultLightStartTime : current.lst,
         };
         await kv!.set('nighter:facs', list);
         updatedFacility = {
@@ -388,6 +397,7 @@ export async function updateFacility(id: string, facility: Partial<Omit<Facility
           childRatePerHour: list[index].c,
           lightRatePerHour: list[index].l,
           allowChildRate: list[index].ac,
+          defaultLightStartTime: list[index].lst,
         };
       }
     } catch (error) {
@@ -404,6 +414,7 @@ export async function updateFacility(id: string, facility: Partial<Omit<Facility
           c: facility.childRatePerHour !== undefined ? facility.childRatePerHour : current.c,
           l: facility.lightRatePerHour !== undefined ? facility.lightRatePerHour : current.l,
           ac: facility.allowChildRate !== undefined ? facility.allowChildRate : current.ac,
+          lst: facility.defaultLightStartTime !== undefined ? facility.defaultLightStartTime : current.lst,
         };
         writeMockData(mockFacilitiesPath, list);
         updatedFacility = {
@@ -413,6 +424,7 @@ export async function updateFacility(id: string, facility: Partial<Omit<Facility
           childRatePerHour: list[index].c,
           lightRatePerHour: list[index].l,
           allowChildRate: list[index].ac,
+          defaultLightStartTime: list[index].lst,
         };
       }
     }
@@ -579,6 +591,7 @@ export async function getReservations(): Promise<Reservation[]> {
       courtStartTime: r.st,
       courtEndTime: r.et,
       lightHours: r.lh,
+      lightStartTime: r.lst,
       feeType: r.ft,
       courtFee,
       lightFee,
@@ -611,6 +624,7 @@ export async function addReservation(
     m: reservation.memo,
     s: reservation.status,
     ca: createdAt,
+    lst: reservation.lightStartTime,
   };
 
   if (USE_MOCK) {
@@ -657,6 +671,7 @@ export async function addReservation(
     courtStartTime: reservation.courtStartTime,
     courtEndTime: reservation.courtEndTime,
     lightHours: reservation.lightHours,
+    lightStartTime: reservation.lightStartTime,
     feeType: reservation.feeType,
     courtFee,
     lightFee,
@@ -727,6 +742,7 @@ export async function updateReservationStatus(id: string, status: SettlementStat
     courtStartTime: kvRec.st,
     courtEndTime: kvRec.et,
     lightHours: kvRec.lh,
+    lightStartTime: kvRec.lst,
     feeType: kvRec.ft,
     courtFee,
     lightFee,
@@ -783,6 +799,7 @@ export async function updateReservation(
     courtStartTime: string;
     courtEndTime: string;
     lightHours: number;
+    lightStartTime?: string;
     feeType: '大人' | '子供';
     memo: string;
     status: '未精算' | '精算済';
@@ -798,6 +815,7 @@ export async function updateReservation(
     ft: data.feeType,
     m: data.memo,
     s: data.status,
+    lst: data.lightStartTime,
   };
 
   let kvRec: KVReservation | null = null;
@@ -856,6 +874,7 @@ export async function updateReservation(
     courtStartTime: kvRec.st,
     courtEndTime: kvRec.et,
     lightHours: kvRec.lh,
+    lightStartTime: kvRec.lst,
     feeType: kvRec.ft,
     courtFee,
     lightFee,

@@ -14,7 +14,7 @@ export async function GET() {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { name, adultRatePerHour, childRatePerHour, lightRatePerHour, allowChildRate } = body;
+    const { name, adultRatePerHour, childRatePerHour, lightRatePerHour, allowChildRate, defaultLightStartTime } = body;
 
     if (!name || name.trim() === '') {
       return NextResponse.json({ error: 'Name is required' }, { status: 400 });
@@ -26,6 +26,7 @@ export async function POST(req: NextRequest) {
       childRatePerHour: Number(childRatePerHour) || 0,
       lightRatePerHour: Number(lightRatePerHour) || 0,
       allowChildRate: !!allowChildRate,
+      defaultLightStartTime: defaultLightStartTime || '',
     });
 
     return NextResponse.json(newFacility, { status: 201 });
@@ -38,7 +39,7 @@ export async function POST(req: NextRequest) {
 export async function PUT(req: NextRequest) {
   try {
     const body = await req.json();
-    const { id, name, adultRatePerHour, childRatePerHour, lightRatePerHour, allowChildRate } = body;
+    const { id, name, adultRatePerHour, childRatePerHour, lightRatePerHour, allowChildRate, defaultLightStartTime } = body;
 
     if (!id) {
       return NextResponse.json({ error: 'Id is required' }, { status: 400 });
@@ -50,6 +51,7 @@ export async function PUT(req: NextRequest) {
       ...(childRatePerHour !== undefined ? { childRatePerHour: Number(childRatePerHour) } : {}),
       ...(lightRatePerHour !== undefined ? { lightRatePerHour: Number(lightRatePerHour) } : {}),
       ...(allowChildRate !== undefined ? { allowChildRate: !!allowChildRate } : {}),
+      ...(defaultLightStartTime !== undefined ? { defaultLightStartTime } : {}),
     });
 
     if (!updated) {
