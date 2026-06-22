@@ -84,7 +84,11 @@ export default function Home() {
         const data = await res.json();
         setFacilities(data);
         if (data.length > 0) {
-          setFormData((prev) => prev.facilityName ? prev : { ...prev, facilityName: data[0].name });
+          setFormData((prev) => prev.facilityName ? prev : {
+            ...prev,
+            facilityName: data[0].name,
+            feeType: data[0].allowChildRate ? '子供' : '大人'
+          });
         }
       }
     } catch (err) { console.error(err); }
@@ -212,13 +216,16 @@ export default function Home() {
         }
         setIsFormOpen(false);
         setEditingReservationId(null);
-        setFormData((prev) => ({
-          ...prev,
-          courtStartTime: '18:00',
-          courtEndTime: '20:00',
-          lightHours: 0,
-          memo: '',
-        }));
+        setFormData((prev) => {
+          const currentFacility = facilities.find((f) => f.name === prev.facilityName);
+          return {
+            ...prev,
+            // courtStartTime と courtEndTime は次回連続入力のためにクリアせず保持する
+            lightHours: 0,
+            memo: '',
+            feeType: (currentFacility && currentFacility.allowChildRate) ? '子供' : '大人',
+          };
+        });
         showToast(isEditing ? '予約を更新しました！' : '予約を保存しました！');
       } else {
         const errData = await res.json();
@@ -421,7 +428,7 @@ export default function Home() {
     setFormData((prev) => ({
       ...prev,
       facilityName: name,
-      feeType: (facility && !facility.allowChildRate) ? '大人' : prev.feeType,
+      feeType: (facility && facility.allowChildRate) ? '子供' : '大人',
     }));
   };
 
@@ -505,8 +512,8 @@ export default function Home() {
   const currentDayReservations = getReservationsForDate(selectedDateStr);
   const selectedFacilityObj = facilities.find((f) => f.name === formData.facilityName);
 
-  // 照明利用時間の選択肢（0〜6時間, 0.5刻み）
-  const lightHoursOptions = Array.from({ length: 13 }, (_, i) => i * 0.5);
+  // 照明利用時間の選択肢（0〜6時間, 1時間刻み）
+  const lightHoursOptions = Array.from({ length: 7 }, (_, i) => i);
 
   // 料金種別のラベル生成（施設に応じた単価も表示）
   const getFeeTypeLabel = (type: FeeType) => {
