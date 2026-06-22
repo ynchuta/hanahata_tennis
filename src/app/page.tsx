@@ -24,12 +24,20 @@ export default function Home() {
   const [reservations, setReservations] = useState<Reservation[]>([]);
   const [report, setReport] = useState<MonthlyReportRow[]>([]);
 
+  // ローカルタイムゾーンでの日付文字列変換（JST/UTCズレ防止）
+  const toLocalDateStr = (date: Date): string => {
+    const y = date.getFullYear();
+    const m = String(date.getMonth() + 1).padStart(2, '0');
+    const d = String(date.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  };
+
   const [currentDate, setCurrentDate] = useState<Date>(new Date());
   const [selectedDateStr, setSelectedDateStr] = useState<string>(
-    new Date().toISOString().split('T')[0]
+    toLocalDateStr(new Date())
   );
   const [reportMonth, setReportMonth] = useState<string>(
-    new Date().toISOString().slice(0, 7)
+    toLocalDateStr(new Date()).slice(0, 7)
   );
 
   const [formData, setFormData] = useState({
@@ -54,6 +62,8 @@ export default function Home() {
   const [newReserverName, setNewReserverName] = useState('');
 
   const [isFormOpen, setIsFormOpen] = useState(false);
+  const [editingReservationId, setEditingReservationId] = useState<string | null>(null);
+  const [isFacilityFormOpen, setIsFacilityFormOpen] = useState(false);
   const [openAccordions, setOpenAccordions] = useState<Record<string, boolean>>({});
   const [toast, setToast] = useState<{ message: string; show: boolean; loading?: boolean }>({
     message: '',
@@ -184,15 +194,24 @@ export default function Home() {
     }
     showToast('保存中...', 0, true);
     try {
+      const isEditing = !!editingReservationId;
+      const payload = isEditing
+        ? { id: editingReservationId, date: selectedDateStr, ...formData }
+        : { date: selectedDateStr, ...formData };
       const res = await fetch('/api/records', {
-        method: 'POST',
+        method: isEditing ? 'PUT' : 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ date: selectedDateStr, ...formData }),
+        body: JSON.stringify(payload),
       });
       if (res.ok) {
-        const newRecord = await res.json();
-        setReservations((prev) => [...prev, newRecord]);
+        const savedRecord = await res.json();
+        if (isEditing) {
+          setReservations((prev) => prev.map((r) => r.id === editingReservationId ? savedRecord : r));
+        } else {
+          setReservations((prev) => [...prev, savedRecord]);
+        }
         setIsFormOpen(false);
+        setEditingReservationId(null);
         setFormData((prev) => ({
           ...prev,
           courtStartTime: '18:00',
@@ -200,7 +219,7 @@ export default function Home() {
           lightHours: 0,
           memo: '',
         }));
-        showToast('予約を保存しました！');
+        showToast(isEditing ? '予約を更新しました！' : '予約を保存しました！');
       } else {
         const errData = await res.json();
         showToast(`エラー: ${errData.error || '保存に失敗しました'}`);
@@ -209,6 +228,22 @@ export default function Home() {
       console.error(err);
       showToast('通信エラーが発生しました');
     }
+  };
+
+  // 予約編集を開始する
+  const handleEditReservation = (r: Reservation) => {
+    setFormData({
+      facilityName: r.facilityName,
+      reserverName: r.reserverName,
+      courtStartTime: r.courtStartTime,
+      courtEndTime: r.courtEndTime,
+      lightHours: r.lightHours,
+      feeType: r.feeType,
+      memo: r.memo,
+    });
+    setEditingReservationId(r.id);
+    setSelectedDateStr(r.date);
+    setIsFormOpen(true);
   };
 
   const handleToggleStatus = async (id: string, currentStatus: string) => {
@@ -427,6 +462,46 @@ export default function Home() {
 
   const calendarDays = getDaysInMonth(currentDate);
   const selectedDate = new Date(selectedDateStr + 'T00:00:00');
+
+  // LINE共有用テキスト生成
+  const generateLineShareText = (): string => {
+    if (report.length === 0) return '';
+    const monthParts = reportMonth.split('-');
+    const monthNum = parseInt(monthParts[1], 10);
+    let text = `【${monthNum}月分 ナイター費精算】\n`;
+
+    for (const parent of report) {
+      text += `\n━━━━━━━━━━━━\n`;
+      text += `👤 ${parent.reserverName}さん\n`;
+
+      for (const r of parent.reservations) {
+        const dateParts = r.date.split('-');
+        const dateLabel = `${parseInt(dateParts[1], 10)}/${parseInt(dateParts[2], 10)}`;
+        const durationMinutes = (() => {
+          const [sh, sm] = r.courtStartTime.split(':').map(Number);
+          const [eh, em] = r.courtEndTime.split(':').map(Number);
+          let diff = (eh * 60 + em) - (sh * 60 + sm);
+          if (diff < 0) diff += 24 * 60;
+          return diff;
+        })();
+        const durationHours = durationMinutes / 60;
+        const durationLabel = Number.isInteger(durationHours) ? `${durationHours}時間` : `${durationHours}時間`;
+
+        text += `\n■${dateLabel} (${r.facilityName})\n`;
+        text += `予約者: ${r.reserverName}さん\n`;
+        text += `コート代: ${durationLabel} (${r.feeType}料金) = ${r.courtFee.toLocaleString()}円\n`;
+        if (r.lightHours > 0) {
+          const lightMinutes = r.lightHours * 60;
+          text += `照明代: ${lightMinutes}分 = ${r.lightFee.toLocaleString()}円\n`;
+        }
+        text += `【小計: ${r.totalFee.toLocaleString()}円】\n`;
+      }
+
+      text += `\n■合計返金額: ${parent.totalAmount.toLocaleString()}円\n`;
+    }
+
+    return text;
+  };
   const currentDayReservations = getReservationsForDate(selectedDateStr);
   const selectedFacilityObj = facilities.find((f) => f.name === formData.facilityName);
 
@@ -570,10 +645,10 @@ export default function Home() {
                 ))}
 
                 {calendarDays.map((day, idx) => {
-                  const dayStr = day.toISOString().split('T')[0];
+                  const dayStr = toLocalDateStr(day);
                   const isCurrentMonth = day.getMonth() === currentDate.getMonth();
                   const isSelected = dayStr === selectedDateStr;
-                  const isToday = dayStr === new Date().toISOString().split('T')[0];
+                  const isToday = dayStr === toLocalDateStr(new Date());
                   const dayReservations = getReservationsForDate(dayStr);
 
                   return (
@@ -582,7 +657,7 @@ export default function Home() {
                       onClick={() => setSelectedDateStr(dayStr)}
                       className={`calendar-day ${isCurrentMonth ? '' : 'outside'} ${isSelected ? 'selected' : ''} ${isToday ? 'today' : ''}`}
                     >
-                      <span className="day-number" style={{ textAlign: 'right', fontSize: '0.85rem' }}>
+                      <span className="day-number" style={{ textAlign: 'center', fontSize: '0.85rem' }}>
                         {day.getDate()}
                       </span>
                       {/* 予約者名バッジ（予約がある日のみ、モバイル向けに苗字のみ表示） */}
@@ -623,17 +698,17 @@ export default function Home() {
                 <button
                   className="btn btn-primary"
                   style={{ width: 'auto', padding: '6px 14px', fontSize: '0.875rem' }}
-                  onClick={() => setIsFormOpen(true)}
+                  onClick={() => { setEditingReservationId(null); setIsFormOpen(true); }}
                 >
                   予約追加
                 </button>
               )}
             </div>
 
-            {/* 新規予約フォーム */}
+            {/* 新規 / 編集 予約フォーム */}
             {isFormOpen && (
               <form onSubmit={handleSubmitReservation} style={{ marginBottom: '1.5rem', borderBottom: '1px solid var(--border-color)', paddingBottom: '1.5rem' }}>
-                <h4 style={{ marginBottom: '1rem', color: 'var(--color-secondary)' }}>新規予約登録</h4>
+                <h4 style={{ marginBottom: '1rem', color: 'var(--color-secondary)' }}>{editingReservationId ? '予約を編集' : '新規予約登録'}</h4>
 
                 <div className="form-group">
                   <label className="form-label">施設名</label>
@@ -730,8 +805,8 @@ export default function Home() {
                 </div>
 
                 <div className="form-row" style={{ marginTop: '0.5rem' }}>
-                  <button type="button" className="btn btn-secondary" onClick={() => setIsFormOpen(false)}>キャンセル</button>
-                  <button type="submit" className="btn btn-primary" disabled={reservers.length === 0 || facilities.length === 0}>保存する</button>
+                  <button type="button" className="btn btn-secondary" onClick={() => { setIsFormOpen(false); setEditingReservationId(null); }}>キャンセル</button>
+                  <button type="submit" className="btn btn-primary" disabled={reservers.length === 0 || facilities.length === 0}>{editingReservationId ? '更新する' : '保存する'}</button>
                 </div>
               </form>
             )}
@@ -773,22 +848,38 @@ export default function Home() {
                             <span className="slider"></span>
                           </label>
                         </div>
-                        {/* 予約削除ボタン */}
-                        <button
-                          className="btn btn-secondary"
-                          style={{
-                            width: 'auto',
-                            padding: '4px 8px',
-                            fontSize: '0.7rem',
-                            color: 'var(--color-accent)',
-                            borderColor: 'rgba(244,63,94,0.3)',
-                            background: 'rgba(244,63,94,0.03)',
-                            marginTop: '0.25rem'
-                          }}
-                          onClick={() => handleDeleteReservation(r.id)}
-                        >
-                          削除
-                        </button>
+                        <div style={{ display: 'flex', gap: '0.35rem' }}>
+                          {/* 予約編集ボタン */}
+                          <button
+                            className="btn btn-secondary"
+                            style={{
+                              width: 'auto',
+                              padding: '4px 8px',
+                              fontSize: '0.7rem',
+                              color: 'var(--color-secondary)',
+                              borderColor: 'rgba(6,182,212,0.3)',
+                              background: 'rgba(6,182,212,0.03)',
+                            }}
+                            onClick={() => handleEditReservation(r)}
+                          >
+                            編集
+                          </button>
+                          {/* 予約削除ボタン */}
+                          <button
+                            className="btn btn-secondary"
+                            style={{
+                              width: 'auto',
+                              padding: '4px 8px',
+                              fontSize: '0.7rem',
+                              color: 'var(--color-accent)',
+                              borderColor: 'rgba(244,63,94,0.3)',
+                              background: 'rgba(244,63,94,0.03)',
+                            }}
+                            onClick={() => handleDeleteReservation(r.id)}
+                          >
+                            削除
+                          </button>
+                        </div>
                       </div>
                     </div>
 
@@ -829,7 +920,25 @@ export default function Home() {
               </p>
             ) : (
               <div>
-                <h3 style={{ marginBottom: '1rem', fontSize: '1.1rem' }}>保護者別の立替合計</h3>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+                  <h3 style={{ fontSize: '1.1rem' }}>保護者別の立替合計</h3>
+                  <button
+                    className="btn btn-secondary"
+                    style={{ width: 'auto', padding: '6px 14px', fontSize: '0.8rem', borderColor: 'rgba(16,185,129,0.4)', color: 'var(--color-success)' }}
+                    onClick={async () => {
+                      const text = generateLineShareText();
+                      if (!text) { showToast('共有するデータがありません'); return; }
+                      try {
+                        await navigator.clipboard.writeText(text);
+                        showToast('LINE共有用テキストをコピーしました！');
+                      } catch {
+                        showToast('コピーに失敗しました');
+                      }
+                    }}
+                  >
+                    📋 LINE共有用にコピー
+                  </button>
+                </div>
                 {report.map((parent) => {
                   const isOpen = !!openAccordions[parent.reserverName];
                   return (
@@ -873,7 +982,7 @@ export default function Home() {
                                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.9rem' }}>
                                   <div>
                                     <div style={{ fontWeight: 500 }}>
-                                      {r.date} <span className="facility-badge" style={{ fontSize: '0.72rem' }}>{r.facilityName}</span>
+                                      {r.date.replace(/-/g, '/')} <span className="facility-badge" style={{ fontSize: '0.72rem' }}>{r.facilityName}</span>
                                     </div>
                                     <div style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)', marginTop: '0.2' }}>
                                       {r.courtStartTime}〜{r.courtEndTime}
@@ -892,22 +1001,6 @@ export default function Home() {
                                       <input type="checkbox" checked={r.status === '精算済'} onChange={() => handleToggleStatus(r.id, r.status)} />
                                       <span className="slider"></span>
                                     </label>
-                                    {/* アコーディオン内の予約削除ボタン */}
-                                    <button
-                                      className="btn btn-secondary"
-                                      style={{
-                                        width: 'auto',
-                                        padding: '4px 8px',
-                                        fontSize: '0.7rem',
-                                        color: 'var(--color-accent)',
-                                        borderColor: 'rgba(244,63,94,0.3)',
-                                        background: 'rgba(244,63,94,0.03)',
-                                        marginLeft: '0.25rem'
-                                      }}
-                                      onClick={() => handleDeleteReservation(r.id)}
-                                    >
-                                      削除
-                                    </button>
                                   </div>
                                 </div>
                               </div>
@@ -930,6 +1023,24 @@ export default function Home() {
           <div className="card">
             <h3 style={{ marginBottom: '1.25rem', color: 'var(--color-secondary)' }}>コート料金設定</h3>
 
+            {/* 施設フォーム折りたたみトグル */}
+            {!isFacilityFormOpen && (
+              <button
+                className="btn btn-secondary"
+                style={{
+                  marginBottom: '1.5rem',
+                  padding: '10px 16px',
+                  fontSize: '0.9rem',
+                  borderColor: 'rgba(139, 92, 246, 0.3)',
+                  color: 'var(--color-primary)',
+                }}
+                onClick={() => setIsFacilityFormOpen(true)}
+              >
+                ＋ 施設設定を追加・編集する
+              </button>
+            )}
+
+            {isFacilityFormOpen && (
             <form onSubmit={handleSubmitFacility} style={{ marginBottom: '2rem', borderBottom: '1px solid var(--border-color)', paddingBottom: '2rem' }}>
               <h4 style={{ marginBottom: '1rem', fontSize: '0.95rem' }}>
                 {isEditingFacility ? 'コート情報を編集' : '新規コートを追加'}
@@ -973,15 +1084,15 @@ export default function Home() {
               </div>
 
               <div className="form-row" style={{ marginTop: '1rem' }}>
-                {isEditingFacility && (
-                  <button type="button" className="btn btn-secondary" onClick={() => {
+                <button type="button" className="btn btn-secondary" onClick={() => {
                     setIsEditingFacility(false);
+                    setIsFacilityFormOpen(false);
                     setFacilityForm({ id: '', name: '', adultRatePerHour: 1000, childRatePerHour: 500, lightRatePerHour: 300, allowChildRate: true });
-                  }}>キャンセル</button>
-                )}
+                  }}>閉じる</button>
                 <button type="submit" className="btn btn-primary">{isEditingFacility ? '更新する' : '追加する'}</button>
               </div>
             </form>
+            )}
 
             {/* コート一覧 */}
             <div>
@@ -1007,6 +1118,7 @@ export default function Home() {
                             style={{ width: 'auto', padding: '4px 10px', fontSize: '0.75rem' }}
                             onClick={() => {
                               setIsEditingFacility(true);
+                              setIsFacilityFormOpen(true);
                               setFacilityForm({ id: f.id, name: f.name, adultRatePerHour: f.adultRatePerHour, childRatePerHour: f.childRatePerHour, lightRatePerHour: f.lightRatePerHour, allowChildRate: f.allowChildRate });
                             }}
                           >編集</button>

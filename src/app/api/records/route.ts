@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getFacilities, getReservations, addReservation } from '@/lib/db';
+import { getFacilities, getReservations, addReservation, updateReservation } from '@/lib/db';
 
 export async function GET() {
   try {
@@ -7,6 +7,55 @@ export async function GET() {
     return NextResponse.json(records);
   } catch (error) {
     console.error('API Error (records GET):', error);
+    return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
+  }
+}
+
+export async function PUT(req: NextRequest) {
+  try {
+    const body = await req.json();
+    const {
+      id,
+      date,
+      facilityName,
+      reserverName,
+      courtStartTime,
+      courtEndTime,
+      lightHours = 0,
+      feeType,
+      memo = '',
+      status = '未精算',
+    } = body;
+
+    if (!id || !date || !facilityName || !reserverName || !courtStartTime || !courtEndTime || !feeType) {
+      return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
+    }
+
+    const facilities = await getFacilities();
+    const facility = facilities.find((f) => f.name === facilityName);
+    if (!facility) {
+      return NextResponse.json({ error: `Facility not found: ${facilityName}` }, { status: 400 });
+    }
+
+    const updated = await updateReservation(id, {
+      date,
+      facilityId: facility.id,
+      reserverName,
+      courtStartTime,
+      courtEndTime,
+      lightHours: Number(lightHours),
+      feeType,
+      memo,
+      status,
+    });
+
+    if (!updated) {
+      return NextResponse.json({ error: 'Record not found' }, { status: 404 });
+    }
+
+    return NextResponse.json(updated);
+  } catch (error) {
+    console.error('API Error (records PUT):', error);
     return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
   }
 }

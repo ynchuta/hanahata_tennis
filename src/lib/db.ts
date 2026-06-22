@@ -774,6 +774,98 @@ export async function testKVConnection(): Promise<boolean> {
   }
 }
 
+export async function updateReservation(
+  id: string,
+  data: {
+    date: string;
+    facilityId: string;
+    reserverName: string;
+    courtStartTime: string;
+    courtEndTime: string;
+    lightHours: number;
+    feeType: '大人' | '子供';
+    memo: string;
+    status: '未精算' | '精算済';
+  }
+): Promise<Reservation | null> {
+  const updatedKV: Partial<KVReservation> = {
+    d: data.date,
+    fid: data.facilityId,
+    rn: data.reserverName,
+    st: data.courtStartTime,
+    et: data.courtEndTime,
+    lh: data.lightHours,
+    ft: data.feeType,
+    m: data.memo,
+    s: data.status,
+  };
+
+  let kvRec: KVReservation | null = null;
+
+  if (USE_MOCK) {
+    const list = readMockData<KVReservation>(mockRecordsPath);
+    const index = list.findIndex((r) => r.id === id);
+    if (index === -1) return null;
+    list[index] = { ...list[index], ...updatedKV };
+    writeMockData(mockRecordsPath, list);
+    kvRec = list[index];
+  } else {
+    try {
+      const list = (await kv!.get<KVReservation[]>('nighter:recs')) || [];
+      const index = list.findIndex((r) => r.id === id);
+      if (index === -1) return null;
+      list[index] = { ...list[index], ...updatedKV };
+      await kv!.set('nighter:recs', list);
+      kvRec = list[index];
+    } catch (error) {
+      console.error('Redis Error (updateReservation), falling back to mock:', error);
+      const list = readMockData<KVReservation>(mockRecordsPath);
+      const index = list.findIndex((r) => r.id === id);
+      if (index === -1) return null;
+      list[index] = { ...list[index], ...updatedKV };
+      writeMockData(mockRecordsPath, list);
+      kvRec = list[index];
+    }
+  }
+
+  if (!kvRec) return null;
+
+  const facilities = await getFacilities();
+  const facility = facilities.find((f) => f.id === kvRec!.fid) || {
+    id: kvRec.fid,
+    name: '不明な施設',
+    adultRatePerHour: 0,
+    childRatePerHour: 0,
+    lightRatePerHour: 0,
+    allowChildRate: false,
+  };
+
+  const { courtFee, lightFee, totalFee } = calculateFees({
+    facility,
+    feeType: kvRec.ft,
+    courtStartTime: kvRec.st,
+    courtEndTime: kvRec.et,
+    lightHours: kvRec.lh,
+  });
+
+  return {
+    id: kvRec.id,
+    date: kvRec.d,
+    facilityName: facility.name,
+    reserverName: kvRec.rn,
+    courtStartTime: kvRec.st,
+    courtEndTime: kvRec.et,
+    lightHours: kvRec.lh,
+    feeType: kvRec.ft,
+    courtFee,
+    lightFee,
+    totalFee,
+    memo: kvRec.m,
+    status: kvRec.s,
+    createdAt: kvRec.ca,
+  };
+}
+
 export async function updateReservationsStatusByReserverMonth(
   month: string,
   reserverName: string,
