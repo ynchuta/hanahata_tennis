@@ -6,33 +6,43 @@ import crypto from 'crypto';
 import { calculateFees } from './calculator';
 
 const KV_REDIS_URL = process.env.KV_REDIS_URL;
-export const USE_MOCK = !KV_REDIS_URL;
+const KV_REST_API_URL = process.env.KV_REST_API_URL;
+const KV_REST_API_TOKEN = process.env.KV_REST_API_TOKEN;
+// Vercel KV 標準変数 (KV_REST_API_URL) または KV_REDIS_URL のいずれかが設定されていれば KV を使用する
+export const USE_MOCK = !KV_REDIS_URL && !KV_REST_API_URL;
 
-// KV_REDIS_URL から REST 用の url と token をパースしてクライアントを初期化する
+// KV クライアントを初期化する
+// 優先順位: ① KV_REST_API_URL + KV_REST_API_TOKEN (Vercel KV 標準)
+//           ② KV_REDIS_URL (redis:// / rediss:// 形式 → REST URL に変換)
+//           ③ KV_REDIS_URL (https:// 形式)
 function initKVClient() {
+  // ① Vercel KV 標準環境変数を優先する
+  if (KV_REST_API_URL && KV_REST_API_TOKEN) {
+    try {
+      return createClient({
+        url: KV_REST_API_URL,
+        token: KV_REST_API_TOKEN,
+      });
+    } catch (error) {
+      console.error('Error initializing KV client from KV_REST_API_URL:', error);
+      return null;
+    }
+  }
+
+  // ② KV_REDIS_URL から初期化する
   if (!KV_REDIS_URL) return null;
   try {
     if (KV_REDIS_URL.startsWith('redis://') || KV_REDIS_URL.startsWith('rediss://')) {
       const urlObj = new URL(KV_REDIS_URL);
       const token = urlObj.password || urlObj.username || '';
-      
-      let restUrl = '';
-      if (urlObj.hostname.includes('upstash.io') && !urlObj.hostname.includes('-rest')) {
-        const parts = urlObj.hostname.split('.');
-        parts[0] = parts[0] + '-rest';
-        restUrl = `https://${parts.join('.')}`;
-      } else {
-        restUrl = `https://${urlObj.hostname}`;
-      }
-
-      return createClient({
-        url: restUrl,
-        token: token,
-      });
+      // Upstash の REST API URL は https://<hostname> のみ（サフィックス変換は不要）
+      const restUrl = `https://${urlObj.hostname}`;
+      return createClient({ url: restUrl, token });
     } else {
+      // すでに https:// 形式
       return createClient({
         url: KV_REDIS_URL,
-        token: process.env.KV_REST_API_TOKEN || '',
+        token: KV_REST_API_TOKEN || '',
       });
     }
   } catch (error) {
