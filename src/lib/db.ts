@@ -128,7 +128,10 @@ function migrateMockDataIfNecessary() {
     // facilities.json
     if (fs.existsSync(mockFacilitiesPath)) {
       try {
-        const raw = fs.readFileSync(mockFacilitiesPath, 'utf-8');
+        let raw = fs.readFileSync(mockFacilitiesPath, 'utf-8');
+        if (raw.startsWith('\uFEFF')) {
+          raw = raw.slice(1);
+        }
         const data = JSON.parse(raw);
         if (Array.isArray(data) && data.length > 0 && 'name' in data[0]) {
           const migrated = (data as OldFacility[]).map((f) => ({
@@ -150,7 +153,10 @@ function migrateMockDataIfNecessary() {
     // reservers.json
     if (fs.existsSync(mockReserversPath)) {
       try {
-        const raw = fs.readFileSync(mockReserversPath, 'utf-8');
+        let raw = fs.readFileSync(mockReserversPath, 'utf-8');
+        if (raw.startsWith('\uFEFF')) {
+          raw = raw.slice(1);
+        }
         const data = JSON.parse(raw);
         if (Array.isArray(data) && data.length > 0 && 'name' in data[0]) {
           const migrated = (data as OldReserver[]).map((r) => ({
@@ -169,12 +175,18 @@ function migrateMockDataIfNecessary() {
     // records.json
     if (fs.existsSync(mockRecordsPath)) {
       try {
-        const raw = fs.readFileSync(mockRecordsPath, 'utf-8');
+        let raw = fs.readFileSync(mockRecordsPath, 'utf-8');
+        if (raw.startsWith('\uFEFF')) {
+          raw = raw.slice(1);
+        }
         const data = JSON.parse(raw);
         if (Array.isArray(data) && data.length > 0 && 'facilityName' in data[0]) {
           const facMap = new Map<string, string>();
           if (fs.existsSync(mockFacilitiesPath)) {
-            const facRaw = fs.readFileSync(mockFacilitiesPath, 'utf-8');
+            let facRaw = fs.readFileSync(mockFacilitiesPath, 'utf-8');
+            if (facRaw.startsWith('\uFEFF')) {
+              facRaw = facRaw.slice(1);
+            }
             const facData = JSON.parse(facRaw) as Record<string, unknown>[];
             for (const f of facData) {
               const name = (f.n || f.name) as string;
@@ -216,7 +228,10 @@ migrateMockDataIfNecessary();
 function readMockData<T>(filePath: string): T[] {
   try {
     if (!fs.existsSync(filePath)) return [];
-    const data = fs.readFileSync(filePath, 'utf-8');
+    let data = fs.readFileSync(filePath, 'utf-8');
+    if (data.startsWith('\uFEFF')) {
+      data = data.slice(1);
+    }
     return JSON.parse(data) as T[];
   } catch (error) {
     console.error(`Error reading mock data from ${filePath}:`, error);
