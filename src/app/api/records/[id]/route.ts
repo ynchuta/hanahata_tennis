@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { updateReservationStatus } from '@/lib/db';
-import { syncToGithub } from '../route';
+import { updateReservationStatus, deleteReservation } from '@/lib/db';
 
 export async function PATCH(
   req: NextRequest,
@@ -20,12 +19,26 @@ export async function PATCH(
       return NextResponse.json({ error: 'Record not found' }, { status: 404 });
     }
 
-    // GitHub 同期を実行
-    await syncToGithub();
-
     return NextResponse.json(updatedRecord);
   } catch (error) {
     console.error('API Error (records PATCH):', error);
+    return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
+  }
+}
+
+export async function DELETE(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  try {
+    const { id } = await params;
+    const success = await deleteReservation(id);
+    if (!success) {
+      return NextResponse.json({ error: 'Record not found' }, { status: 404 });
+    }
+    return NextResponse.json({ success: true });
+  } catch (error) {
+    console.error('API Error (records DELETE):', error);
     return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
   }
 }

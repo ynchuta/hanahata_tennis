@@ -1,47 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getFacilities, getReservations, addReservation, getReservers } from '@/lib/db';
-import { calculateFees } from '@/lib/calculator';
-import { syncSettlementStatusToGithub } from '@/lib/github';
-
-/**
- * 全データをまとめて settlement_status.json に同期する
- * 予約ステータス・施設マスタ・保護者マスタを含めるが、金額や口座情報は除外する
- */
-export async function syncToGithub() {
-  try {
-    const [reservations, facilities, reservers] = await Promise.all([
-      getReservations(),
-      getFacilities(),
-      getReservers(),
-    ]);
-
-    const publicData = {
-      updatedAt: new Date().toISOString(),
-      facilities: facilities.map((f) => ({
-        name: f.name,
-        allowChildRate: f.allowChildRate,
-      })),
-      reservers: reservers.map((r) => ({
-        name: r.name,
-      })),
-      reservations: reservations.map((r) => ({
-        date: r.date,
-        facilityName: r.facilityName,
-        reserverName: r.reserverName,
-        courtStartTime: r.courtStartTime,
-        courtEndTime: r.courtEndTime,
-        lightHours: r.lightHours,
-        feeType: r.feeType,
-        status: r.status,
-        // 金額・口座情報は公開しない
-      })),
-    };
-
-    await syncSettlementStatusToGithub(publicData as any);
-  } catch (error) {
-    console.error('Failed to auto-sync to GitHub:', error);
-  }
-}
+import { getFacilities, getReservations, addReservation } from '@/lib/db';
 
 export async function GET() {
   try {
@@ -77,30 +35,18 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: `Facility not found: ${facilityName}` }, { status: 400 });
     }
 
-    const { courtFee, lightFee, totalFee, appliedFeeType } = calculateFees({
-      facility,
-      feeType,
-      courtStartTime,
-      courtEndTime,
-      lightHours: Number(lightHours),
-    });
-
+    // 新しい addReservation は内部で料金を計算して保存し、結合された Reservation オブジェクトを返す
     const newRecord = await addReservation({
       date,
-      facilityName,
+      facilityId: facility.id, // facilityId を指定して保存する
       reserverName,
       courtStartTime,
       courtEndTime,
       lightHours: Number(lightHours),
-      feeType: appliedFeeType,
-      courtFee,
-      lightFee,
-      totalFee,
+      feeType,
       memo,
       status: '未精算',
     });
-
-    await syncToGithub();
 
     return NextResponse.json(newRecord, { status: 201 });
   } catch (error) {

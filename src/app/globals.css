@@ -615,3 +615,41 @@ input:checked + .slider:before {
   min-height: 52px;
 }
 
+/* モバイルレスポンシブ改善 */
+@media (max-width: 480px) {
+  .container {
+    padding: 0.5rem;
+  }
+
+  .card {
+    padding: 0.75rem;
+    border-radius: 0.75rem;
+  }
+
+  .calendar-grid {
+    gap: 3px;
+  }
+
+  .calendar-day {
+    min-height: 44px;
+    aspect-ratio: auto;
+    padding: 2px 1px;
+    border-radius: 0.4rem;
+  }
+
+  .day-number {
+    font-size: 0.75rem !important;
+  }
+
+  .day-reserver-name {
+    font-size: 0.5rem !important;
+    padding: 0px 2px !important;
+    border-radius: 2px !important;
+  }
+
+  .day-reserver-list {
+    margin-top: 1px;
+    gap: 1px;
+  }
+}
+

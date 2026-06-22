@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getReservers, addReserver, deleteReserver } from '@/lib/db';
-import { syncToGithub } from '../records/route';
 
 export async function GET() {
   try {
@@ -19,7 +18,6 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Name is required' }, { status: 400 });
     }
     const newReserver = await addReserver(name.trim());
-    await syncToGithub();
     return NextResponse.json(newReserver, { status: 201 });
   } catch (error) {
     console.error('API Error (reservers POST):', error);
@@ -38,7 +36,6 @@ export async function DELETE(req: NextRequest) {
     if (!success) {
       return NextResponse.json({ error: 'Reserver not found' }, { status: 404 });
     }
-    await syncToGithub();
     return NextResponse.json({ success: true });
   } catch (error) {
     console.error('API Error (reservers DELETE):', error);

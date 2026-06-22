@@ -1,28 +1,206 @@
-import { google } from 'googleapis';
+import { createClient } from '@vercel/kv';
 import { Facility, Reservation, SettlementStatus } from '../types';
 import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
+import { calculateFees } from './calculator';
 
-const SPREADSHEET_ID = process.env.SPREADSHEET_ID;
-const GOOGLE_SERVICE_ACCOUNT_EMAIL = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
-const GOOGLE_PRIVATE_KEY = process.env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g, '\n');
+const KV_REDIS_URL = process.env.KV_REDIS_URL;
+export const USE_MOCK = !KV_REDIS_URL;
 
-export const USE_MOCK =
-  process.env.USE_MOCK === 'true' ||
-  !SPREADSHEET_ID ||
-  !GOOGLE_SERVICE_ACCOUNT_EMAIL ||
-  !GOOGLE_PRIVATE_KEY;
+// KV_REDIS_URL から REST 用の url と token をパースしてクライアントを初期化する
+function initKVClient() {
+  if (!KV_REDIS_URL) return null;
+  try {
+    if (KV_REDIS_URL.startsWith('redis://') || KV_REDIS_URL.startsWith('rediss://')) {
+      const urlObj = new URL(KV_REDIS_URL);
+      const token = urlObj.password || urlObj.username || '';
+      
+      let restUrl = '';
+      if (urlObj.hostname.includes('upstash.io') && !urlObj.hostname.includes('-rest')) {
+        const parts = urlObj.hostname.split('.');
+        parts[0] = parts[0] + '-rest';
+        restUrl = `https://${parts.join('.')}`;
+      } else {
+        restUrl = `https://${urlObj.hostname}`;
+      }
+
+      return createClient({
+        url: restUrl,
+        token: token,
+      });
+    } else {
+      return createClient({
+        url: KV_REDIS_URL,
+        token: process.env.KV_REST_API_TOKEN || '',
+      });
+    }
+  } catch (error) {
+    console.error('Error initializing KV client from KV_REDIS_URL:', error);
+    return null;
+  }
+}
+
+const kv = initKVClient();
 
 const mockFacilitiesPath = path.join(process.cwd(), 'mock-data', 'facilities.json');
 const mockRecordsPath = path.join(process.cwd(), 'mock-data', 'records.json');
 const mockReserversPath = path.join(process.cwd(), 'mock-data', 'reservers.json');
+
+// 短縮キー形式のインターフェース定義
+interface KVFacility {
+  id: string;
+  n: string;   // name
+  a: number;   // adultRatePerHour
+  c: number;   // childRatePerHour
+  l: number;   // lightRatePerHour
+  ac: boolean; // allowChildRate
+}
 
 export interface Reserver {
   id: string;
   name: string;
   createdAt: string;
 }
+
+interface KVReserver {
+  id: string;
+  n: string;   // name
+  ca: string;  // createdAt
+}
+
+interface KVReservation {
+  id: string;
+  d: string;   // date (YYYY-MM-DD)
+  fid: string; // facilityId (正規化: 施設名や料金は持たない)
+  rn: string;  // reserverName
+  st: string;  // courtStartTime (HH:MM)
+  et: string;  // courtEndTime (HH:MM)
+  lh: number;  // lightHours
+  ft: '大人' | '子供'; // feeType
+  m: string;   // memo
+  s: '未精算' | '精算済'; // status
+  ca: string;  // createdAt
+}
+
+interface OldFacility {
+  id: string;
+  name: string;
+  adultRatePerHour: number;
+  childRatePerHour: number;
+  lightRatePerHour: number;
+  allowChildRate: boolean;
+}
+
+interface OldReserver {
+  id: string;
+  name: string;
+  createdAt: string;
+}
+
+interface OldReservation {
+  id: string;
+  date: string;
+  facilityName: string;
+  reserverName: string;
+  courtStartTime: string;
+  courtEndTime: string;
+  lightHours?: number;
+  feeType?: '大人' | '子供';
+  memo?: string;
+  status?: '未精算' | '精算済';
+  createdAt?: string;
+}
+
+// 既存モックデータのマイグレーション処理
+function migrateMockDataIfNecessary() {
+  if (USE_MOCK) {
+    // facilities.json
+    if (fs.existsSync(mockFacilitiesPath)) {
+      try {
+        const raw = fs.readFileSync(mockFacilitiesPath, 'utf-8');
+        const data = JSON.parse(raw);
+        if (Array.isArray(data) && data.length > 0 && 'name' in data[0]) {
+          const migrated = (data as OldFacility[]).map((f) => ({
+            id: f.id,
+            n: f.name,
+            a: f.adultRatePerHour,
+            c: f.childRatePerHour,
+            l: f.lightRatePerHour,
+            ac: f.allowChildRate
+          }));
+          fs.writeFileSync(mockFacilitiesPath, JSON.stringify(migrated, null, 2), 'utf-8');
+          console.log('[Migration] Migrated facilities.json to short key format');
+        }
+      } catch (e) {
+        console.error('Migration error (facilities):', e);
+      }
+    }
+
+    // reservers.json
+    if (fs.existsSync(mockReserversPath)) {
+      try {
+        const raw = fs.readFileSync(mockReserversPath, 'utf-8');
+        const data = JSON.parse(raw);
+        if (Array.isArray(data) && data.length > 0 && 'name' in data[0]) {
+          const migrated = (data as OldReserver[]).map((r) => ({
+            id: r.id,
+            n: r.name,
+            ca: r.createdAt
+          }));
+          fs.writeFileSync(mockReserversPath, JSON.stringify(migrated, null, 2), 'utf-8');
+          console.log('[Migration] Migrated reservers.json to short key format');
+        }
+      } catch (e) {
+        console.error('Migration error (reservers):', e);
+      }
+    }
+
+    // records.json
+    if (fs.existsSync(mockRecordsPath)) {
+      try {
+        const raw = fs.readFileSync(mockRecordsPath, 'utf-8');
+        const data = JSON.parse(raw);
+        if (Array.isArray(data) && data.length > 0 && 'facilityName' in data[0]) {
+          const facMap = new Map<string, string>();
+          if (fs.existsSync(mockFacilitiesPath)) {
+            const facRaw = fs.readFileSync(mockFacilitiesPath, 'utf-8');
+            const facData = JSON.parse(facRaw) as Record<string, unknown>[];
+            for (const f of facData) {
+              const name = (f.n || f.name) as string;
+              const id = f.id as string;
+              facMap.set(name, id);
+            }
+          }
+
+          const migrated = (data as OldReservation[]).map((r) => {
+            const fid = facMap.get(r.facilityName) || 'unknown';
+            return {
+              id: r.id,
+              d: r.date,
+              fid: fid,
+              rn: r.reserverName,
+              st: r.courtStartTime,
+              et: r.courtEndTime,
+              lh: r.lightHours || 0,
+              ft: r.feeType || '大人',
+              m: r.memo || '',
+              s: r.status || '未精算',
+              ca: r.createdAt || new Date().toISOString()
+            };
+          });
+          fs.writeFileSync(mockRecordsPath, JSON.stringify(migrated, null, 2), 'utf-8');
+          console.log('[Migration] Migrated records.json to short key format and normalized facilityId');
+        }
+      } catch (e) {
+        console.error('Migration error (records):', e);
+      }
+    }
+  }
+}
+
+// マイグレーションの実行
+migrateMockDataIfNecessary();
 
 // ヘルパー: モックデータの読み込み
 function readMockData<T>(filePath: string): T[] {
@@ -49,179 +227,151 @@ function writeMockData<T>(filePath: string, data: T[]): void {
   }
 }
 
-// Google Sheets クライアントの初期化
-function getSheetsClient() {
-  const auth = new google.auth.JWT({
-    email: GOOGLE_SERVICE_ACCOUNT_EMAIL,
-    key: GOOGLE_PRIVATE_KEY,
-    scopes: ['https://www.googleapis.com/auth/spreadsheets'],
-  });
-  return google.sheets({ version: 'v4', auth });
-}
-
-// ヘルパー: シート名からシートIDを取得する
-async function getSheetIdByName(sheets: any, sheetName: string): Promise<number | null> {
-  try {
-    const spreadsheet = await sheets.spreadsheets.get({
-      spreadsheetId: SPREADSHEET_ID,
-    });
-    const sheet = spreadsheet.data.sheets?.find(
-      (s: any) => s.properties?.title === sheetName
-    );
-    return sheet?.properties?.sheetId ?? null;
-  } catch (error) {
-    console.error(`Error getting sheetId for ${sheetName}:`, error);
-    return null;
-  }
-}
-
 /* =========================================================================
    施設マスタ (Facilities)
    ========================================================================= */
 
-/**
- * 施設マスタ一覧を取得する
- */
 export async function getFacilities(): Promise<Facility[]> {
+  let list: KVFacility[] = [];
   if (USE_MOCK) {
-    return readMockData<Facility>(mockFacilitiesPath);
+    list = readMockData<KVFacility>(mockFacilitiesPath);
+  } else {
+    try {
+      list = (await kv!.get<KVFacility[]>('nighter:facs')) || [];
+    } catch (error) {
+      console.error('Redis Error (getFacilities), falling back to mock:', error);
+      list = readMockData<KVFacility>(mockFacilitiesPath);
+    }
   }
 
-  try {
-    const sheets = getSheetsClient();
-    const response = await sheets.spreadsheets.values.get({
-      spreadsheetId: SPREADSHEET_ID,
-      range: 'facilities!A2:F',
-    });
-
-    const rows = response.data.values;
-    if (!rows || rows.length === 0) return [];
-
-    return rows.map((row) => ({
-      id: row[0],
-      name: row[1],
-      adultRatePerHour: Number(row[2]) || 0,
-      childRatePerHour: Number(row[3]) || 0,
-      lightRatePerHour: Number(row[4]) || 0,
-      allowChildRate: row[5] === 'TRUE',
-    }));
-  } catch (error) {
-    console.error('Google Sheets API Error (getFacilities), falling back to mock:', error);
-    return readMockData<Facility>(mockFacilitiesPath);
-  }
+  return list.map((f) => ({
+    id: f.id,
+    name: f.n,
+    adultRatePerHour: f.a,
+    childRatePerHour: f.c,
+    lightRatePerHour: f.l,
+    allowChildRate: f.ac,
+  }));
 }
 
-/**
- * 施設マスタを追加する
- */
 export async function addFacility(facility: Omit<Facility, 'id'>): Promise<Facility> {
   const newFacility: Facility = {
     id: crypto.randomUUID(),
     ...facility,
   };
+  const kvFac: KVFacility = {
+    id: newFacility.id,
+    n: newFacility.name,
+    a: newFacility.adultRatePerHour,
+    c: newFacility.childRatePerHour,
+    l: newFacility.lightRatePerHour,
+    ac: newFacility.allowChildRate,
+  };
 
   if (USE_MOCK) {
-    const list = readMockData<Facility>(mockFacilitiesPath);
-    list.push(newFacility);
+    const list = readMockData<KVFacility>(mockFacilitiesPath);
+    list.push(kvFac);
     writeMockData(mockFacilitiesPath, list);
-    return newFacility;
+  } else {
+    try {
+      const list = (await kv!.get<KVFacility[]>('nighter:facs')) || [];
+      list.push(kvFac);
+      await kv!.set('nighter:facs', list);
+    } catch (error) {
+      console.error('Redis Error (addFacility), falling back to mock:', error);
+      const list = readMockData<KVFacility>(mockFacilitiesPath);
+      list.push(kvFac);
+      writeMockData(mockFacilitiesPath, list);
+    }
   }
 
-  try {
-    const sheets = getSheetsClient();
-    const values = [[
-      newFacility.id,
-      newFacility.name,
-      newFacility.adultRatePerHour,
-      newFacility.childRatePerHour,
-      newFacility.lightRatePerHour,
-      newFacility.allowChildRate ? 'TRUE' : 'FALSE',
-    ]];
-
-    await sheets.spreadsheets.values.append({
-      spreadsheetId: SPREADSHEET_ID,
-      range: 'facilities!A:F',
-      valueInputOption: 'USER_ENTERED',
-      requestBody: { values },
-    });
-
-    return newFacility;
-  } catch (error) {
-    console.error('Google Sheets API Error (addFacility), falling back to mock:', error);
-    const list = readMockData<Facility>(mockFacilitiesPath);
-    list.push(newFacility);
-    writeMockData(mockFacilitiesPath, list);
-    return newFacility;
-  }
+  return newFacility;
 }
 
-/**
- * 施設マスタを更新する
- */
 export async function updateFacility(id: string, facility: Partial<Omit<Facility, 'id'>>): Promise<Facility | null> {
+  let updatedFacility: Facility | null = null;
+
   if (USE_MOCK) {
-    const list = readMockData<Facility>(mockFacilitiesPath);
+    const list = readMockData<KVFacility>(mockFacilitiesPath);
     const index = list.findIndex((f) => f.id === id);
-    if (index === -1) return null;
-    list[index] = { ...list[index], ...facility };
-    writeMockData(mockFacilitiesPath, list);
-    return list[index];
+    if (index !== -1) {
+      const current = list[index];
+      list[index] = {
+        id: current.id,
+        n: facility.name !== undefined ? facility.name : current.n,
+        a: facility.adultRatePerHour !== undefined ? facility.adultRatePerHour : current.a,
+        c: facility.childRatePerHour !== undefined ? facility.childRatePerHour : current.c,
+        l: facility.lightRatePerHour !== undefined ? facility.lightRatePerHour : current.l,
+        ac: facility.allowChildRate !== undefined ? facility.allowChildRate : current.ac,
+      };
+      writeMockData(mockFacilitiesPath, list);
+      updatedFacility = {
+        id: list[index].id,
+        name: list[index].n,
+        adultRatePerHour: list[index].a,
+        childRatePerHour: list[index].c,
+        lightRatePerHour: list[index].l,
+        allowChildRate: list[index].ac,
+      };
+    }
+  } else {
+    try {
+      const list = (await kv!.get<KVFacility[]>('nighter:facs')) || [];
+      const index = list.findIndex((f) => f.id === id);
+      if (index !== -1) {
+        const current = list[index];
+        list[index] = {
+          id: current.id,
+          n: facility.name !== undefined ? facility.name : current.n,
+          a: facility.adultRatePerHour !== undefined ? facility.adultRatePerHour : current.a,
+          c: facility.childRatePerHour !== undefined ? facility.childRatePerHour : current.c,
+          l: facility.lightRatePerHour !== undefined ? facility.lightRatePerHour : current.l,
+          ac: facility.allowChildRate !== undefined ? facility.allowChildRate : current.ac,
+        };
+        await kv!.set('nighter:facs', list);
+        updatedFacility = {
+          id: list[index].id,
+          name: list[index].n,
+          adultRatePerHour: list[index].a,
+          childRatePerHour: list[index].c,
+          lightRatePerHour: list[index].l,
+          allowChildRate: list[index].ac,
+        };
+      }
+    } catch (error) {
+      console.error('Redis Error (updateFacility), falling back to mock:', error);
+      // フォールバック
+      const list = readMockData<KVFacility>(mockFacilitiesPath);
+      const index = list.findIndex((f) => f.id === id);
+      if (index !== -1) {
+        const current = list[index];
+        list[index] = {
+          id: current.id,
+          n: facility.name !== undefined ? facility.name : current.n,
+          a: facility.adultRatePerHour !== undefined ? facility.adultRatePerHour : current.a,
+          c: facility.childRatePerHour !== undefined ? facility.childRatePerHour : current.c,
+          l: facility.lightRatePerHour !== undefined ? facility.lightRatePerHour : current.l,
+          ac: facility.allowChildRate !== undefined ? facility.allowChildRate : current.ac,
+        };
+        writeMockData(mockFacilitiesPath, list);
+        updatedFacility = {
+          id: list[index].id,
+          name: list[index].n,
+          adultRatePerHour: list[index].a,
+          childRatePerHour: list[index].c,
+          lightRatePerHour: list[index].l,
+          allowChildRate: list[index].ac,
+        };
+      }
+    }
   }
 
-  try {
-    const sheets = getSheetsClient();
-    const response = await sheets.spreadsheets.values.get({
-      spreadsheetId: SPREADSHEET_ID,
-      range: 'facilities!A:A',
-    });
-
-    const rows = response.data.values;
-    if (!rows || rows.length === 0) return null;
-
-    const rowIndex = rows.findIndex((row) => row[0] === id) + 1;
-    if (rowIndex === 0) return null;
-
-    const currentList = await getFacilities();
-    const current = currentList.find((f) => f.id === id);
-    if (!current) return null;
-
-    const updated = { ...current, ...facility };
-    
-    // A〜F列を一括更新
-    await sheets.spreadsheets.values.update({
-      spreadsheetId: SPREADSHEET_ID,
-      range: `facilities!A${rowIndex}:F${rowIndex}`,
-      valueInputOption: 'USER_ENTERED',
-      requestBody: {
-        values: [[
-          updated.id,
-          updated.name,
-          updated.adultRatePerHour,
-          updated.childRatePerHour,
-          updated.lightRatePerHour,
-          updated.allowChildRate ? 'TRUE' : 'FALSE',
-        ]],
-      },
-    });
-
-    return updated;
-  } catch (error) {
-    console.error('Google Sheets API Error (updateFacility), falling back to mock:', error);
-    const list = readMockData<Facility>(mockFacilitiesPath);
-    const index = list.findIndex((f) => f.id === id);
-    if (index === -1) return null;
-    list[index] = { ...list[index], ...facility };
-    writeMockData(mockFacilitiesPath, list);
-    return list[index];
-  }
+  return updatedFacility;
 }
 
-/**
- * 施設マスタを削除する
- */
 export async function deleteFacility(id: string): Promise<boolean> {
   if (USE_MOCK) {
-    const list = readMockData<Facility>(mockFacilitiesPath);
+    const list = readMockData<KVFacility>(mockFacilitiesPath);
     const filtered = list.filter((f) => f.id !== id);
     if (list.length === filtered.length) return false;
     writeMockData(mockFacilitiesPath, filtered);
@@ -229,43 +379,14 @@ export async function deleteFacility(id: string): Promise<boolean> {
   }
 
   try {
-    const sheets = getSheetsClient();
-    const response = await sheets.spreadsheets.values.get({
-      spreadsheetId: SPREADSHEET_ID,
-      range: 'facilities!A:A',
-    });
-
-    const rows = response.data.values;
-    if (!rows || rows.length === 0) return false;
-
-    const rowIndex = rows.findIndex((row) => row[0] === id) + 1;
-    if (rowIndex === 0) return false;
-
-    const sheetId = await getSheetIdByName(sheets, 'facilities');
-    if (sheetId === null) return false;
-
-    await sheets.spreadsheets.batchUpdate({
-      spreadsheetId: SPREADSHEET_ID,
-      requestBody: {
-        requests: [
-          {
-            deleteDimension: {
-              range: {
-                sheetId,
-                dimension: 'ROWS',
-                startIndex: rowIndex - 1,
-                endIndex: rowIndex,
-              },
-            },
-          },
-        ],
-      },
-    });
-
+    const list = (await kv!.get<KVFacility[]>('nighter:facs')) || [];
+    const filtered = list.filter((f) => f.id !== id);
+    if (list.length === filtered.length) return false;
+    await kv!.set('nighter:facs', filtered);
     return true;
   } catch (error) {
-    console.error('Google Sheets API Error (deleteFacility), falling back to mock:', error);
-    const list = readMockData<Facility>(mockFacilitiesPath);
+    console.error('Redis Error (deleteFacility), falling back to mock:', error);
+    const list = readMockData<KVFacility>(mockFacilitiesPath);
     const filtered = list.filter((f) => f.id !== id);
     if (list.length === filtered.length) return false;
     writeMockData(mockFacilitiesPath, filtered);
@@ -277,83 +398,61 @@ export async function deleteFacility(id: string): Promise<boolean> {
    保護者マスタ (Reservers)
    ========================================================================= */
 
-/**
- * 保護者一覧を取得する
- */
 export async function getReservers(): Promise<Reserver[]> {
+  let list: KVReserver[] = [];
   if (USE_MOCK) {
-    return readMockData<Reserver>(mockReserversPath);
+    list = readMockData<KVReserver>(mockReserversPath);
+  } else {
+    try {
+      list = (await kv!.get<KVReserver[]>('nighter:resvs')) || [];
+    } catch (error) {
+      console.error('Redis Error (getReservers), falling back to mock:', error);
+      list = readMockData<KVReserver>(mockReserversPath);
+    }
   }
 
-  try {
-    const sheets = getSheetsClient();
-    const response = await sheets.spreadsheets.values.get({
-      spreadsheetId: SPREADSHEET_ID,
-      range: 'reservers!A2:C',
-    });
-
-    const rows = response.data.values;
-    if (!rows || rows.length === 0) return [];
-
-    return rows.map((row) => ({
-      id: row[0],
-      name: row[1],
-      createdAt: row[2],
-    }));
-  } catch (error) {
-    console.error('Google Sheets API Error (getReservers), falling back to mock:', error);
-    return readMockData<Reserver>(mockReserversPath);
-  }
+  return list.map((r) => ({
+    id: r.id,
+    name: r.n,
+    createdAt: r.ca,
+  }));
 }
 
-/**
- * 保護者を追加する
- */
 export async function addReserver(name: string): Promise<Reserver> {
   const newReserver: Reserver = {
     id: crypto.randomUUID(),
     name,
     createdAt: new Date().toISOString(),
   };
+  const kvRes: KVReserver = {
+    id: newReserver.id,
+    n: newReserver.name,
+    ca: newReserver.createdAt,
+  };
 
   if (USE_MOCK) {
-    const list = readMockData<Reserver>(mockReserversPath);
-    list.push(newReserver);
+    const list = readMockData<KVReserver>(mockReserversPath);
+    list.push(kvRes);
     writeMockData(mockReserversPath, list);
-    return newReserver;
+  } else {
+    try {
+      const list = (await kv!.get<KVReserver[]>('nighter:resvs')) || [];
+      list.push(kvRes);
+      await kv!.set('nighter:resvs', list);
+    } catch (error) {
+      console.error('Redis Error (addReserver), falling back to mock:', error);
+      const list = readMockData<KVReserver>(mockReserversPath);
+      list.push(kvRes);
+      writeMockData(mockReserversPath, list);
+    }
   }
 
-  try {
-    const sheets = getSheetsClient();
-    const values = [[
-      newReserver.id,
-      newReserver.name,
-      newReserver.createdAt,
-    ]];
-
-    await sheets.spreadsheets.values.append({
-      spreadsheetId: SPREADSHEET_ID,
-      range: 'reservers!A:C',
-      valueInputOption: 'USER_ENTERED',
-      requestBody: { values },
-    });
-
-    return newReserver;
-  } catch (error) {
-    console.error('Google Sheets API Error (addReserver), falling back to mock:', error);
-    const list = readMockData<Reserver>(mockReserversPath);
-    list.push(newReserver);
-    writeMockData(mockReserversPath, list);
-    return newReserver;
-  }
+  return newReserver;
 }
 
-/**
- * 保護者を削除する
- */
 export async function deleteReserver(id: string): Promise<boolean> {
   if (USE_MOCK) {
-    const list = readMockData<Reserver>(mockReserversPath);
+    const list = readMockData<KVReserver>(mockReserversPath);
     const filtered = list.filter((r) => r.id !== id);
     if (list.length === filtered.length) return false;
     writeMockData(mockReserversPath, filtered);
@@ -361,43 +460,14 @@ export async function deleteReserver(id: string): Promise<boolean> {
   }
 
   try {
-    const sheets = getSheetsClient();
-    const response = await sheets.spreadsheets.values.get({
-      spreadsheetId: SPREADSHEET_ID,
-      range: 'reservers!A:A',
-    });
-
-    const rows = response.data.values;
-    if (!rows || rows.length === 0) return false;
-
-    const rowIndex = rows.findIndex((row) => row[0] === id) + 1;
-    if (rowIndex === 0) return false;
-
-    const sheetId = await getSheetIdByName(sheets, 'reservers');
-    if (sheetId === null) return false;
-
-    await sheets.spreadsheets.batchUpdate({
-      spreadsheetId: SPREADSHEET_ID,
-      requestBody: {
-        requests: [
-          {
-            deleteDimension: {
-              range: {
-                sheetId,
-                dimension: 'ROWS',
-                startIndex: rowIndex - 1,
-                endIndex: rowIndex,
-              },
-            },
-          },
-        ],
-      },
-    });
-
+    const list = (await kv!.get<KVReserver[]>('nighter:resvs')) || [];
+    const filtered = list.filter((r) => r.id !== id);
+    if (list.length === filtered.length) return false;
+    await kv!.set('nighter:resvs', filtered);
     return true;
   } catch (error) {
-    console.error('Google Sheets API Error (deleteReserver), falling back to mock:', error);
-    const list = readMockData<Reserver>(mockReserversPath);
+    console.error('Redis Error (deleteReserver), falling back to mock:', error);
+    const list = readMockData<KVReserver>(mockReserversPath);
     const filtered = list.filter((r) => r.id !== id);
     if (list.length === filtered.length) return false;
     writeMockData(mockReserversPath, filtered);
@@ -409,146 +479,233 @@ export async function deleteReserver(id: string): Promise<boolean> {
    予約記録 (Reservations)
    ========================================================================= */
 
-/**
- * 予約記録一覧を取得する
- */
 export async function getReservations(): Promise<Reservation[]> {
+  let records: KVReservation[] = [];
   if (USE_MOCK) {
-    return readMockData<Reservation>(mockRecordsPath);
+    records = readMockData<KVReservation>(mockRecordsPath);
+  } else {
+    try {
+      records = (await kv!.get<KVReservation[]>('nighter:recs')) || [];
+    } catch (error) {
+      console.error('Redis Error (getReservations), falling back to mock:', error);
+      records = readMockData<KVReservation>(mockRecordsPath);
+    }
   }
 
-  try {
-    const sheets = getSheetsClient();
-    const response = await sheets.spreadsheets.values.get({
-      spreadsheetId: SPREADSHEET_ID,
-      range: 'records!A2:N',
+  // 施設マスタを並行して取得して結合・計算する
+  const facilities = await getFacilities();
+  const facilityMap = new Map<string, Facility>();
+  for (const f of facilities) {
+    facilityMap.set(f.id, f);
+  }
+
+  return records.map((r) => {
+    // 施設情報を ID でマッピングする（見つからない場合は仮の施設オブジェクトを作る）
+    const facility = facilityMap.get(r.fid) || {
+      id: r.fid,
+      name: '不明な施設',
+      adultRatePerHour: 0,
+      childRatePerHour: 0,
+      lightRatePerHour: 0,
+      allowChildRate: false,
+    };
+
+    // 料金を動的計算する
+    const { courtFee, lightFee, totalFee } = calculateFees({
+      facility,
+      feeType: r.ft,
+      courtStartTime: r.st,
+      courtEndTime: r.et,
+      lightHours: r.lh,
     });
 
-    const rows = response.data.values;
-    if (!rows || rows.length === 0) return [];
-
-    return rows.map((row) => ({
-      id: row[0],
-      date: row[1],
-      facilityName: row[2],
-      reserverName: row[3],
-      courtStartTime: row[4],
-      courtEndTime: row[5],
-      lightHours: Number(row[6]) || 0,
-      feeType: row[7] as any,
-      courtFee: Number(row[8]) || 0,
-      lightFee: Number(row[9]) || 0,
-      totalFee: Number(row[10]) || 0,
-      memo: row[11] || '',
-      status: row[12] as any,
-      createdAt: row[13],
-    }));
-  } catch (error) {
-    console.error('Google Sheets API Error (getReservations), falling back to mock:', error);
-    return readMockData<Reservation>(mockRecordsPath);
-  }
+    return {
+      id: r.id,
+      date: r.d,
+      facilityName: facility.name,
+      reserverName: r.rn,
+      courtStartTime: r.st,
+      courtEndTime: r.et,
+      lightHours: r.lh,
+      feeType: r.ft,
+      courtFee,
+      lightFee,
+      totalFee,
+      memo: r.m,
+      status: r.s,
+      createdAt: r.ca,
+    };
+  });
 }
 
-/**
- * 新しい予約記録を追加する
- */
-export async function addReservation(reservation: Omit<Reservation, 'id' | 'createdAt'>): Promise<Reservation> {
+// 予約を追加する際、施設名から施設IDへの解決を行うための引数を取る
+export async function addReservation(
+  reservation: Omit<Reservation, 'id' | 'createdAt' | 'courtFee' | 'lightFee' | 'totalFee' | 'facilityName'> & {
+    facilityId: string;
+  }
+): Promise<Reservation> {
   const newId = crypto.randomUUID();
   const createdAt = new Date().toISOString();
-  const newReservation: Reservation = {
+
+  const kvRec: KVReservation = {
     id: newId,
-    createdAt,
-    ...reservation,
+    d: reservation.date,
+    fid: reservation.facilityId,
+    rn: reservation.reserverName,
+    st: reservation.courtStartTime,
+    et: reservation.courtEndTime,
+    lh: reservation.lightHours,
+    ft: reservation.feeType,
+    m: reservation.memo,
+    s: reservation.status,
+    ca: createdAt,
   };
 
   if (USE_MOCK) {
-    const records = readMockData<Reservation>(mockRecordsPath);
-    records.push(newReservation);
-    writeMockData(mockRecordsPath, records);
-    return newReservation;
+    const list = readMockData<KVReservation>(mockRecordsPath);
+    list.push(kvRec);
+    writeMockData(mockRecordsPath, list);
+  } else {
+    try {
+      const list = (await kv!.get<KVReservation[]>('nighter:recs')) || [];
+      list.push(kvRec);
+      await kv!.set('nighter:recs', list);
+    } catch (error) {
+      console.error('Redis Error (addReservation), falling back to mock:', error);
+      const list = readMockData<KVReservation>(mockRecordsPath);
+      list.push(kvRec);
+      writeMockData(mockRecordsPath, list);
+    }
   }
 
-  try {
-    const sheets = getSheetsClient();
-    const values = [[
-      newReservation.id,
-      newReservation.date,
-      newReservation.facilityName,
-      newReservation.reserverName,
-      newReservation.courtStartTime,
-      newReservation.courtEndTime,
-      newReservation.lightHours,
-      newReservation.feeType,
-      newReservation.courtFee,
-      newReservation.lightFee,
-      newReservation.totalFee,
-      newReservation.memo,
-      newReservation.status,
-      newReservation.createdAt,
-    ]];
+  // 呼び出し元が使いやすいように、結合した Reservation を返す
+  const facilities = await getFacilities();
+  const facility = facilities.find((f) => f.id === reservation.facilityId) || {
+    id: reservation.facilityId,
+    name: '不明な施設',
+    adultRatePerHour: 0,
+    childRatePerHour: 0,
+    lightRatePerHour: 0,
+    allowChildRate: false,
+  };
 
-    await sheets.spreadsheets.values.append({
-      spreadsheetId: SPREADSHEET_ID,
-      range: 'records!A:N',
-      valueInputOption: 'USER_ENTERED',
-      requestBody: { values },
-    });
+  const { courtFee, lightFee, totalFee } = calculateFees({
+    facility,
+    feeType: reservation.feeType,
+    courtStartTime: reservation.courtStartTime,
+    courtEndTime: reservation.courtEndTime,
+    lightHours: reservation.lightHours,
+  });
 
-    return newReservation;
-  } catch (error) {
-    console.error('Google Sheets API Error (addReservation), falling back to mock:', error);
-    const records = readMockData<Reservation>(mockRecordsPath);
-    records.push(newReservation);
-    writeMockData(mockRecordsPath, records);
-    return newReservation;
-  }
+  return {
+    id: newId,
+    date: reservation.date,
+    facilityName: facility.name,
+    reserverName: reservation.reserverName,
+    courtStartTime: reservation.courtStartTime,
+    courtEndTime: reservation.courtEndTime,
+    lightHours: reservation.lightHours,
+    feeType: reservation.feeType,
+    courtFee,
+    lightFee,
+    totalFee,
+    memo: reservation.memo,
+    status: reservation.status,
+    createdAt,
+  };
 }
 
-/**
- * 予約の精算ステータスを更新する
- */
 export async function updateReservationStatus(id: string, status: SettlementStatus): Promise<Reservation | null> {
+  let kvRec: KVReservation | null = null;
+
   if (USE_MOCK) {
-    const records = readMockData<Reservation>(mockRecordsPath);
-    const index = records.findIndex((r) => r.id === id);
-    if (index === -1) return null;
-    records[index].status = status;
-    writeMockData(mockRecordsPath, records);
-    return records[index];
+    const list = readMockData<KVReservation>(mockRecordsPath);
+    const index = list.findIndex((r) => r.id === id);
+    if (index !== -1) {
+      list[index].s = status;
+      writeMockData(mockRecordsPath, list);
+      kvRec = list[index];
+    }
+  } else {
+    try {
+      const list = (await kv!.get<KVReservation[]>('nighter:recs')) || [];
+      const index = list.findIndex((r) => r.id === id);
+      if (index !== -1) {
+        list[index].s = status;
+        await kv!.set('nighter:recs', list);
+        kvRec = list[index];
+      }
+    } catch (error) {
+      console.error('Redis Error (updateReservationStatus), falling back to mock:', error);
+      const list = readMockData<KVReservation>(mockRecordsPath);
+      const index = list.findIndex((r) => r.id === id);
+      if (index !== -1) {
+        list[index].s = status;
+        writeMockData(mockRecordsPath, list);
+        kvRec = list[index];
+      }
+    }
+  }
+
+  if (!kvRec) return null;
+
+  const facilities = await getFacilities();
+  const facility = facilities.find((f) => f.id === kvRec!.fid) || {
+    id: kvRec!.fid,
+    name: '不明な施設',
+    adultRatePerHour: 0,
+    childRatePerHour: 0,
+    lightRatePerHour: 0,
+    allowChildRate: false,
+  };
+
+  const { courtFee, lightFee, totalFee } = calculateFees({
+    facility,
+    feeType: kvRec.ft,
+    courtStartTime: kvRec.st,
+    courtEndTime: kvRec.et,
+    lightHours: kvRec.lh,
+  });
+
+  return {
+    id: kvRec.id,
+    date: kvRec.d,
+    facilityName: facility.name,
+    reserverName: kvRec.rn,
+    courtStartTime: kvRec.st,
+    courtEndTime: kvRec.et,
+    lightHours: kvRec.lh,
+    feeType: kvRec.ft,
+    courtFee,
+    lightFee,
+    totalFee,
+    memo: kvRec.m,
+    status: kvRec.s,
+    createdAt: kvRec.ca,
+  };
+}
+
+export async function deleteReservation(id: string): Promise<boolean> {
+  if (USE_MOCK) {
+    const list = readMockData<KVReservation>(mockRecordsPath);
+    const filtered = list.filter((r) => r.id !== id);
+    if (list.length === filtered.length) return false;
+    writeMockData(mockRecordsPath, filtered);
+    return true;
   }
 
   try {
-    const sheets = getSheetsClient();
-    
-    const response = await sheets.spreadsheets.values.get({
-      spreadsheetId: SPREADSHEET_ID,
-      range: 'records!A:A',
-    });
-
-    const rows = response.data.values;
-    if (!rows || rows.length === 0) return null;
-
-    const rowIndex = rows.findIndex((row) => row[0] === id) + 1;
-    if (rowIndex === 0) return null;
-
-    await sheets.spreadsheets.values.update({
-      spreadsheetId: SPREADSHEET_ID,
-      range: `records!M${rowIndex}`,
-      valueInputOption: 'USER_ENTERED',
-      requestBody: {
-        values: [[status]],
-      },
-    });
-
-    const allRecords = await getReservations();
-    return allRecords.find((r) => r.id === id) || null;
+    const list = (await kv!.get<KVReservation[]>('nighter:recs')) || [];
+    const filtered = list.filter((r) => r.id !== id);
+    if (list.length === filtered.length) return false;
+    await kv!.set('nighter:recs', filtered);
+    return true;
   } catch (error) {
-    console.error('Google Sheets API Error (updateReservationStatus), falling back to mock:', error);
-    const records = readMockData<Reservation>(mockRecordsPath);
-    const index = records.findIndex((r) => r.id === id);
-    if (index === -1) return null;
-    records[index].status = status;
-    writeMockData(mockRecordsPath, records);
-    return records[index];
+    console.error('Redis Error (deleteReservation), falling back to mock:', error);
+    const list = readMockData<KVReservation>(mockRecordsPath);
+    const filtered = list.filter((r) => r.id !== id);
+    if (list.length === filtered.length) return false;
+    writeMockData(mockRecordsPath, filtered);
+    return true;
   }
 }

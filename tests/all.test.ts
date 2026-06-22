@@ -23,10 +23,8 @@ const hakatamori: Facility = {
   allowChildRate: false,
 };
 
-const mockFacilitiesPath = path.join(process.cwd(), 'mock-data', 'facilities.json');
 const mockRecordsPath = path.join(process.cwd(), 'mock-data', 'records.json');
 const mockReserversPath = path.join(process.cwd(), 'mock-data', 'reservers.json');
-const mockGithubOutputPath = path.join(process.cwd(), 'mock-data', 'settlement_status.json');
 
 describe('テニス部ナイター費精算管理システム テストスイート', () => {
 
@@ -96,34 +94,37 @@ describe('テニス部ナイター費精算管理システム テストスイー
     test('テストケース[複数予約]: 同一日で複数名が別々の予約を登録した際、データが競合せず個別に保存されるか検証', async () => {
       process.env.USE_MOCK = 'true';
 
-      const { addReservation, getReservations } = await import('../src/lib/db');
+      const { addReservation, getReservations, addFacility } = await import('../src/lib/db');
+
+      // テスト用に施設を登録する
+      const testFacility = await addFacility({
+        name: '桧原運動公園',
+        adultRatePerHour: 1000,
+        childRatePerHour: 500,
+        lightRatePerHour: 300,
+        allowChildRate: true,
+      });
 
       await addReservation({
         date: '2026-06-18',
-        facilityName: '桧原運動公園',
+        facilityId: testFacility.id,
         reserverName: '保護者A',
         courtStartTime: '18:00',
         courtEndTime: '20:00',
         lightHours: 0,
         feeType: '大人',
-        courtFee: 2000,
-        lightFee: 0,
-        totalFee: 2000,
         memo: '',
         status: '未精算',
       });
 
       await addReservation({
         date: '2026-06-18',
-        facilityName: '桧原運動公園',
+        facilityId: testFacility.id,
         reserverName: '保護者B',
         courtStartTime: '19:00',
         courtEndTime: '21:00',
         lightHours: 1,
         feeType: '大人',
-        courtFee: 2000,
-        lightFee: 300,
-        totalFee: 2300,
         memo: 'コートA使用',
         status: '未精算',
       });
@@ -148,47 +149,6 @@ describe('テニス部ナイター費精算管理システム テストスイー
       const withMemo = records.find(r => r.memo !== '');
       assert.ok(withMemo);
       assert.strictEqual(withMemo.memo, 'コートA使用');
-    });
-
-    test('テストケース[外部連携]: 施設・保護者・予約情報を含む構造化データが公開用JSONに出力されるか検証', async () => {
-      const { getReservations, getFacilities, getReservers, addReserver } = await import('../src/lib/db');
-      const { syncSettlementStatusToGithub } = await import('../src/lib/github');
-
-      // 保護者を追加して同期データに反映されるか確認
-      await addReserver('テスト保護者');
-
-      const [reservations, facilities, reservers] = await Promise.all([
-        getReservations(), getFacilities(), getReservers()
-      ]);
-
-      const publicData = {
-        updatedAt: new Date().toISOString(),
-        facilities: facilities.map(f => ({ name: f.name, allowChildRate: f.allowChildRate })),
-        reservers: reservers.map(r => ({ name: r.name })),
-        reservations: reservations.map(r => ({
-          date: r.date,
-          facilityName: r.facilityName,
-          reserverName: r.reserverName,
-          status: r.status,
-        })),
-      };
-
-      const success = await syncSettlementStatusToGithub(publicData);
-      assert.ok(success);
-
-      assert.ok(fs.existsSync(mockGithubOutputPath));
-      const parsed = JSON.parse(fs.readFileSync(mockGithubOutputPath, 'utf-8'));
-
-      // 施設・保護者・予約がすべて含まれていることを確認
-      assert.ok(Array.isArray(parsed.facilities));
-      assert.ok(Array.isArray(parsed.reservers));
-      assert.ok(Array.isArray(parsed.reservations));
-
-      // 金額などの機密データは含まれていないことを確認
-      if (parsed.reservations.length > 0) {
-        assert.strictEqual((parsed.reservations[0] as any).courtFee, undefined);
-        assert.strictEqual((parsed.reservations[0] as any).totalFee, undefined);
-      }
     });
   });
 

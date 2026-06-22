@@ -1,7 +1,7 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { Facility, Reservation, MonthlyReportRow, FeeType } from '@/types';
+import { useState, useEffect, useCallback } from 'react';
+import { Facility, Reservation, MonthlyReportRow, FeeType, SettlementStatus } from '@/types';
 
 interface Reserver {
   id: string;
@@ -9,6 +9,14 @@ interface Reserver {
 }
 
 export default function Home() {
+  // 共有アカウント簡易認証用のステート
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [isAuthChecking, setIsAuthChecking] = useState(true);
+  const [loginId, setLoginId] = useState('');
+  const [loginPassword, setLoginPassword] = useState('');
+  const [loginError, setLoginError] = useState('');
+  const [loginLoading, setLoginLoading] = useState(false);
+
   const [activeTab, setActiveTab] = useState<'calendar' | 'report' | 'settings'>('calendar');
 
   const [facilities, setFacilities] = useState<Facility[]>([]);
@@ -52,24 +60,14 @@ export default function Home() {
     show: false,
   });
 
-  useEffect(() => {
-    fetchFacilities();
-    fetchReservers();
-    fetchReservations();
-  }, []);
-
-  useEffect(() => {
-    fetchReport();
-  }, [reportMonth, reservations]);
-
-  const showToast = (message: string, duration = 3000, loading = false) => {
+  const showToast = useCallback((message: string, duration = 3000, loading = false) => {
     setToast({ message, show: true, loading });
     if (!loading && duration > 0) {
       setTimeout(() => setToast((prev) => ({ ...prev, show: false })), duration);
     }
-  };
+  }, []);
 
-  const fetchFacilities = async () => {
+  const fetchFacilities = useCallback(async () => {
     try {
       const res = await fetch('/api/facilities');
       if (res.ok) {
@@ -80,9 +78,9 @@ export default function Home() {
         }
       }
     } catch (err) { console.error(err); }
-  };
+  }, []);
 
-  const fetchReservers = async () => {
+  const fetchReservers = useCallback(async () => {
     try {
       const res = await fetch('/api/reservers');
       if (res.ok) {
@@ -93,20 +91,89 @@ export default function Home() {
         }
       }
     } catch (err) { console.error(err); }
-  };
+  }, []);
 
-  const fetchReservations = async () => {
+  const fetchReservations = useCallback(async () => {
     try {
       const res = await fetch('/api/records');
       if (res.ok) setReservations(await res.json());
     } catch (err) { console.error(err); }
-  };
+  }, []);
 
-  const fetchReport = async () => {
+  const fetchReport = useCallback(async () => {
     try {
       const res = await fetch(`/api/summary?month=${reportMonth}`);
       if (res.ok) setReport(await res.json());
     } catch (err) { console.error(err); }
+  }, [reportMonth]);
+
+  // セッション（LocalStorage）のチェック
+  useEffect(() => {
+    const auth = localStorage.getItem('nighter_auth');
+    if (auth === 'true') {
+      Promise.resolve().then(() => {
+        setIsLoggedIn(true);
+      });
+    }
+    Promise.resolve().then(() => {
+      setIsAuthChecking(false);
+    });
+  }, []);
+
+  useEffect(() => {
+    if (isLoggedIn) {
+      Promise.resolve().then(() => {
+        fetchFacilities();
+        fetchReservers();
+        fetchReservations();
+      });
+    }
+  }, [isLoggedIn, fetchFacilities, fetchReservers, fetchReservations]);
+
+  useEffect(() => {
+    if (isLoggedIn) {
+      Promise.resolve().then(() => {
+        fetchReport();
+      });
+    }
+  }, [reportMonth, reservations, isLoggedIn, fetchReport]);
+
+  // ログイン処理
+  const handleLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoginLoading(true);
+    setLoginError('');
+    try {
+      const res = await fetch('/api/auth', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: loginId, password: loginPassword }),
+      });
+      if (res.ok) {
+        localStorage.setItem('nighter_auth', 'true');
+        setIsLoggedIn(true);
+        showToast('ログインしました');
+      } else {
+        const errData = await res.json();
+        setLoginError(errData.error || 'ログインに失敗しました');
+      }
+    } catch (err) {
+      console.error(err);
+      setLoginError('通信エラーが発生しました');
+    } finally {
+      setLoginLoading(false);
+    }
+  };
+
+  // ログアウト処理
+  const handleLogout = () => {
+    if (confirm('ログアウトしますか？')) {
+      localStorage.removeItem('nighter_auth');
+      setIsLoggedIn(false);
+      setLoginId('');
+      setLoginPassword('');
+      setLoginError('');
+    }
   };
 
   const handleSubmitReservation = async (e: React.FormEvent) => {
@@ -133,7 +200,7 @@ export default function Home() {
           lightHours: 0,
           memo: '',
         }));
-        showToast('予約を保存し、GitHubと同期しました！');
+        showToast('予約を保存しました！');
       } else {
         const errData = await res.json();
         showToast(`エラー: ${errData.error || '保存に失敗しました'}`);
@@ -157,14 +224,33 @@ export default function Home() {
       if (res.ok) {
         const updated = await res.json();
         setReservations((prev) => prev.map((r) => r.id === id ? updated : r));
-        showToast('精算ステータスを更新し、GitHubと同期しました！');
+        showToast('精算ステータスを更新しました！');
       } else {
-        setReservations((prev) => prev.map((r) => r.id === id ? { ...r, status: currentStatus as any } : r));
+        setReservations((prev) => prev.map((r) => r.id === id ? { ...r, status: currentStatus as SettlementStatus } : r));
         showToast('ステータス更新に失敗しました');
       }
     } catch (err) {
       console.error(err);
-      setReservations((prev) => prev.map((r) => r.id === id ? { ...r, status: currentStatus as any } : r));
+      setReservations((prev) => prev.map((r) => r.id === id ? { ...r, status: currentStatus as SettlementStatus } : r));
+      showToast('通信エラーが発生しました');
+    }
+  };
+
+  // 予約の削除処理
+  const handleDeleteReservation = async (id: string) => {
+    if (!confirm('本当にこの予約を物理削除しますか？\nこの操作は取り消せません。')) return;
+    showToast('削除中...', 0, true);
+    try {
+      const res = await fetch(`/api/records/${id}`, { method: 'DELETE' });
+      if (res.ok) {
+        setReservations((prev) => prev.filter((r) => r.id !== id));
+        showToast('予約を物理削除しました');
+      } else {
+        const err = await res.json();
+        showToast(`エラー: ${err.error || '削除に失敗しました'}`);
+      }
+    } catch (err) {
+      console.error(err);
       showToast('通信エラーが発生しました');
     }
   };
@@ -294,6 +380,16 @@ export default function Home() {
 
   const getReservationsForDate = (dateStr: string) => reservations.filter((r) => r.date === dateStr);
 
+  // 保護者名から苗字のみを抽出する（モバイル表示用）
+  const getLastName = (fullName: string) => {
+    if (!fullName) return '';
+    const parts = fullName.trim().split(/[\s　]+/);
+    if (parts.length > 1) {
+      return parts[0];
+    }
+    return fullName.length > 3 ? fullName.slice(0, 2) : fullName;
+  };
+
   const calendarDays = getDaysInMonth(currentDate);
   const selectedDate = new Date(selectedDateStr + 'T00:00:00');
   const currentDayReservations = getReservationsForDate(selectedDateStr);
@@ -311,9 +407,98 @@ export default function Home() {
     return `${type === '大人' ? '大人' : '子供'}料金 (${rate.toLocaleString()}円/時)`;
   };
 
+  // 認証のローディング中
+  if (isAuthChecking) {
+    return (
+      <div style={{ display: 'flex', minHeight: '100vh', alignItems: 'center', justifyContent: 'center', backgroundColor: 'var(--bg-main)' }}>
+        <div className="spinner"></div>
+      </div>
+    );
+  }
+
+  // 簡易ログイン画面
+  if (!isLoggedIn) {
+    return (
+      <main className="container" style={{ display: 'flex', minHeight: '80vh', alignItems: 'center', justifyContent: 'center' }}>
+        <div className="card" style={{ width: '100%', maxWidth: '400px', padding: '2rem' }}>
+          <header className="app-header" style={{ padding: '0 0 1.5rem 0', marginBottom: 0 }}>
+            <h1 className="app-title">Tennis Nighter</h1>
+            <p className="app-subtitle">テニス部ナイター費精算管理システム</p>
+          </header>
+          
+          <form onSubmit={handleLogin}>
+            <h3 style={{ marginBottom: '1.25rem', fontSize: '1.1rem', textAlign: 'center', color: 'var(--color-secondary)' }}>
+              ログイン
+            </h3>
+
+            {loginError && (
+              <div style={{
+                background: 'rgba(244, 63, 94, 0.15)',
+                border: '1px solid var(--color-accent)',
+                color: 'var(--color-text-main)',
+                fontSize: '0.875rem',
+                padding: '0.75rem',
+                borderRadius: '0.5rem',
+                marginBottom: '1rem',
+                textAlign: 'center'
+              }}>
+                {loginError}
+              </div>
+            )}
+
+            <div className="form-group">
+              <label className="form-label">ユーザーID</label>
+              <input
+                type="text"
+                className="form-input"
+                required
+                placeholder="User ID"
+                value={loginId}
+                onChange={(e) => setLoginId(e.target.value)}
+              />
+            </div>
+
+            <div className="form-group">
+              <label className="form-label">パスワード</label>
+              <input
+                type="password"
+                className="form-input"
+                required
+                placeholder="Password"
+                value={loginPassword}
+                onChange={(e) => setLoginPassword(e.target.value)}
+              />
+            </div>
+
+            <button type="submit" className="btn btn-primary" style={{ marginTop: '1.5rem' }} disabled={loginLoading}>
+              {loginLoading ? 'ログイン中...' : 'ログイン'}
+            </button>
+          </form>
+        </div>
+      </main>
+    );
+  }
+
+  // ログイン後のメイン画面
   return (
     <main className="container">
-      <header className="app-header">
+      <header className="app-header" style={{ position: 'relative' }}>
+        <button
+          className="btn btn-secondary"
+          style={{
+            position: 'absolute',
+            top: '5px',
+            right: '0',
+            width: 'auto',
+            padding: '4px 10px',
+            fontSize: '0.75rem',
+            borderColor: 'rgba(255,255,255,0.15)',
+            background: 'rgba(255,255,255,0.03)'
+          }}
+          onClick={handleLogout}
+        >
+          ログアウト
+        </button>
         <h1 className="app-title">Tennis Nighter</h1>
         <p className="app-subtitle">テニス部ナイター費精算管理システム</p>
       </header>
@@ -366,17 +551,22 @@ export default function Home() {
                       <span className="day-number" style={{ textAlign: 'right', fontSize: '0.85rem' }}>
                         {day.getDate()}
                       </span>
-                      {/* 予約者名バッジ（予約がある日のみ） */}
+                      {/* 予約者名バッジ（予約がある日のみ、モバイル向けに苗字のみ表示） */}
                       {dayReservations.length > 0 && isCurrentMonth && (
                         <div className="day-reserver-list">
-                          {dayReservations.slice(0, 3).map((r) => (
-                            <span
-                              key={r.id}
-                              className={`day-reserver-name ${r.status === '精算済' ? 'settled' : 'unsettled'}`}
-                            >
-                              {r.reserverName.length > 5 ? r.reserverName.slice(0, 4) + '…' : r.reserverName}
-                            </span>
-                          ))}
+                          {dayReservations.slice(0, 3).map((r) => {
+                            const lastName = getLastName(r.reserverName);
+                            // セル幅に収めるためさらに短縮
+                            const displayName = lastName.length > 3 ? lastName.slice(0, 2) + '…' : lastName;
+                            return (
+                              <span
+                                key={r.id}
+                                className={`day-reserver-name ${r.status === '精算済' ? 'settled' : 'unsettled'}`}
+                              >
+                                {displayName}
+                              </span>
+                            );
+                          })}
                           {dayReservations.length > 3 && (
                             <span className="day-reserver-name" style={{ background: 'rgba(255,255,255,0.1)', color: 'var(--color-text-muted)' }}>
                               +{dayReservations.length - 3}件
@@ -539,14 +729,32 @@ export default function Home() {
                           </span>
                         </div>
                       </div>
-                      <div className="settlement-checkbox-wrapper">
-                        <span style={{ fontSize: '0.85rem', color: r.status === '精算済' ? 'var(--color-success)' : 'var(--color-accent)' }}>
-                          {r.status}
-                        </span>
-                        <label className="switch">
-                          <input type="checkbox" checked={r.status === '精算済'} onChange={() => handleToggleStatus(r.id, r.status)} />
-                          <span className="slider"></span>
-                        </label>
+                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '0.5rem' }}>
+                        <div className="settlement-checkbox-wrapper">
+                          <span style={{ fontSize: '0.85rem', color: r.status === '精算済' ? 'var(--color-success)' : 'var(--color-accent)' }}>
+                            {r.status}
+                          </span>
+                          <label className="switch">
+                            <input type="checkbox" checked={r.status === '精算済'} onChange={() => handleToggleStatus(r.id, r.status)} />
+                            <span className="slider"></span>
+                          </label>
+                        </div>
+                        {/* 予約削除ボタン */}
+                        <button
+                          className="btn btn-secondary"
+                          style={{
+                            width: 'auto',
+                            padding: '4px 8px',
+                            fontSize: '0.7rem',
+                            color: 'var(--color-accent)',
+                            borderColor: 'rgba(244,63,94,0.3)',
+                            background: 'rgba(244,63,94,0.03)',
+                            marginTop: '0.25rem'
+                          }}
+                          onClick={() => handleDeleteReservation(r.id)}
+                        >
+                          削除
+                        </button>
                       </div>
                     </div>
 
@@ -623,7 +831,7 @@ export default function Home() {
                                     <div style={{ fontWeight: 500 }}>
                                       {r.date} <span className="facility-badge" style={{ fontSize: '0.72rem' }}>{r.facilityName}</span>
                                     </div>
-                                    <div style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)', marginTop: '0.2rem' }}>
+                                    <div style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)', marginTop: '0.2' }}>
                                       {r.courtStartTime}〜{r.courtEndTime}
                                       {r.lightHours > 0 && ` | 照明${r.lightHours}時間`}
                                       {' | '}{r.feeType}
@@ -634,12 +842,28 @@ export default function Home() {
                                       </div>
                                     )}
                                   </div>
-                                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexShrink: 0 }}>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexShrink: 0 }}>
                                     <span style={{ fontWeight: 600 }}>{r.totalFee.toLocaleString()}円</span>
                                     <label className="switch">
                                       <input type="checkbox" checked={r.status === '精算済'} onChange={() => handleToggleStatus(r.id, r.status)} />
                                       <span className="slider"></span>
                                     </label>
+                                    {/* アコーディオン内の予約削除ボタン */}
+                                    <button
+                                      className="btn btn-secondary"
+                                      style={{
+                                        width: 'auto',
+                                        padding: '4px 8px',
+                                        fontSize: '0.7rem',
+                                        color: 'var(--color-accent)',
+                                        borderColor: 'rgba(244,63,94,0.3)',
+                                        background: 'rgba(244,63,94,0.03)',
+                                        marginLeft: '0.25rem'
+                                      }}
+                                      onClick={() => handleDeleteReservation(r.id)}
+                                    >
+                                      削除
+                                    </button>
                                   </div>
                                 </div>
                               </div>
@@ -761,7 +985,7 @@ export default function Home() {
             <h3 style={{ marginBottom: '1.25rem', color: 'var(--color-secondary)' }}>保護者 (予約者) 設定</h3>
 
             <form onSubmit={handleSubmitReserver} style={{ display: 'flex', gap: '0.5rem', marginBottom: '1.5rem' }}>
-              <input type="text" className="form-input" required placeholder="例: 佐藤保護者" value={newReserverName} onChange={(e) => setNewReserverName(e.target.value)} />
+              <input type="text" className="form-input" required placeholder="例: 佐藤" value={newReserverName} onChange={(e) => setNewReserverName(e.target.value)} />
               <button type="submit" className="btn btn-primary" style={{ width: 'auto', whiteSpace: 'nowrap' }}>登録する</button>
             </form>
 

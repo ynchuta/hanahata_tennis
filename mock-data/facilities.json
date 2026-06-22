@@ -1,18 +1,26 @@
 [
   {
-    "id": "1",
-    "name": "桧原運動公園",
-    "adultRatePerHour": 1000,
-    "childRatePerHour": 500,
-    "lightRatePerHour": 300,
-    "allowChildRate": true
+    "id": "ada45220-719e-49b3-9499-b054a6dc5518",
+    "n": "桧原運動公園",
+    "a": 800,
+    "c": 400,
+    "l": 1000,
+    "ac": true
   },
   {
-    "id": "2",
-    "name": "博多の森",
-    "adultRatePerHour": 1200,
-    "childRatePerHour": 1200,
-    "lightRatePerHour": 400,
-    "allowChildRate": false
+    "id": "eed2085a-2a73-46b6-8a4f-ee3580d72e1f",
+    "n": "桧原運動公園",
+    "a": 1000,
+    "c": 500,
+    "l": 300,
+    "ac": true
+  },
+  {
+    "id": "d2bc9b85-1fb1-4c46-bb3d-b2755a79ad8a",
+    "n": "桧原運動公園",
+    "a": 1000,
+    "c": 500,
+    "l": 300,
+    "ac": true
   }
 ]
