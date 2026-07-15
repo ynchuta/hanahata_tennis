@@ -7,7 +7,9 @@ import { calculateFees } from './calculator';
 
 const SPREADSHEET_ID = process.env.SPREADSHEET_ID;
 const GOOGLE_SERVICE_ACCOUNT_EMAIL = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
-const GOOGLE_PRIVATE_KEY = process.env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g, '\n');
+const GOOGLE_PRIVATE_KEY = process.env.GOOGLE_PRIVATE_KEY
+  ?.replace(/^"|"$/g, '') // ダブルクォーテーションで囲まれている場合のトリム
+  ?.replace(/\\n/g, '\n');
 
 // 実行時に動的にモックモード判定を行う
 export function getUseMock(): boolean {
@@ -108,7 +110,7 @@ function getSheetsClient() {
 // シートIDの取得
 async function getSheetIdByName(sheets: any, sheetName: string): Promise<number | null> {
   try {
-    const spreadsheet = await sheets.sheets.get({
+    const spreadsheet = await sheets.spreadsheets.get({
       spreadsheetId: SPREADSHEET_ID,
     });
     const sheet = spreadsheet.data.sheets?.find(
