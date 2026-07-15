@@ -1120,25 +1120,26 @@ export async function updateReservation(
     createdAt: kvRec.ca,
   };
 }
-
 export async function updateReservationsStatusByReserverMonth(
-  reserverName: string,
   month: string,
+  reserverName: string,
   status: SettlementStatus
-): Promise<boolean> {
+): Promise<number> {
   if (getUseMock()) {
     const list = readMockData<KVReservation>(mockRecordsPath);
-    let updated = false;
+    let count = 0;
     for (const r of list) {
       if (r.rn === reserverName && r.d.startsWith(month) && (r.cs || 'active') !== 'cancelled') {
-        r.s = status;
-        updated = true;
+        if (r.s !== status) {
+          r.s = status;
+          count++;
+        }
       }
     }
-    if (updated) {
+    if (count > 0) {
       writeMockData(mockRecordsPath, list);
     }
-    return updated;
+    return count;
   }
 
   try {
@@ -1149,9 +1150,9 @@ export async function updateReservationsStatusByReserverMonth(
     });
 
     const rows = response.data.values;
-    if (!rows || rows.length === 0) return false;
+    if (!rows || rows.length === 0) return 0;
 
-    let updated = false;
+    let count = 0;
     const batchUpdates = [];
 
     for (let i = 1; i < rows.length; i++) {
@@ -1159,13 +1160,16 @@ export async function updateReservationsStatusByReserverMonth(
       const rDate = row[1];
       const rReserver = row[3];
       const rCancel = row[14] || 'active';
+      const rSettlement = row[12];
 
       if (rReserver === reserverName && rDate.startsWith(month) && rCancel !== 'cancelled') {
-        batchUpdates.push({
-          range: `records!M${i + 1}`,
-          values: [[status]],
-        });
-        updated = true;
+        if (rSettlement !== status) {
+          batchUpdates.push({
+            range: `records!M${i + 1}`,
+            values: [[status]],
+          });
+          count++;
+        }
       }
     }
 
@@ -1179,9 +1183,9 @@ export async function updateReservationsStatusByReserverMonth(
       });
     }
 
-    return updated;
+    return count;
   } catch (error) {
     console.error('Google Sheets API Error (updateReservationsStatusByReserverMonth), falling back to mock:', error);
-    return false;
+    return 0;
   }
 }
