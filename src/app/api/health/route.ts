@@ -27,21 +27,22 @@ export async function GET() {
     NODE_ENV: process.env.NODE_ENV,
   };
 
-  // KV接続テスト
+  // KV接続テスト（タイムアウト5秒）
   if (!useMock) {
     try {
-      // 疎通確認を試みる（タイムアウト5秒）
-      const isConnected = await Promise.race([
+      const errorMsg = await Promise.race([
         testKVConnection(),
-        new Promise<boolean>((_, reject) =>
-          setTimeout(() => reject(new Error('TIMEOUT after 5s')), 5000)
+        new Promise<string>((resolve) =>
+          setTimeout(() => resolve('TIMEOUT after 5s'), 5000)
         ),
       ]);
 
-      if (isConnected) {
+      if (errorMsg === null) {
+        // null = 接続成功
         return NextResponse.json({ status: 'ok', kv: 'connected', ...envInfo });
       } else {
-        return NextResponse.json({ status: 'error', kv: 'failed', error: 'Connection test returned false', ...envInfo });
+        // string = エラーメッセージ
+        return NextResponse.json({ status: 'error', kv: 'failed', error: errorMsg, ...envInfo });
       }
     } catch (err: unknown) {
       const errMsg = err instanceof Error ? err.message : String(err);

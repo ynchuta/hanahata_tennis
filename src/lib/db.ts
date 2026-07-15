@@ -875,15 +875,20 @@ export async function deleteReservation(id: string): Promise<boolean> {
   }
 }
 
-export async function testKVConnection(): Promise<boolean> {
-  if (getUseMock() || !getKV()) return false;
+// 接続テスト: null=成功, string=エラーメッセージ
+export async function testKVConnection(): Promise<string | null> {
+  const kvInstance = getKV();
+  console.log('[KV testKVConnection] useMock:', getUseMock(), 'kvInstance:', kvInstance !== null ? 'present' : 'null');
+  if (getUseMock()) return 'MOCK_MODE';
+  if (!kvInstance) return 'KV_CLIENT_NULL';
   try {
     // 疎通確認として 'nighter:ping' を get してみる
     await kv.get('nighter:ping');
-    return true;
+    return null; // null = 成功
   } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
     console.error('KV Connection test failed:', error);
-    return false;
+    return msg;
   }
 }
 
