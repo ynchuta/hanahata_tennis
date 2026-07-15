@@ -148,6 +148,13 @@ export default function Home() {
     }
   }, [isLoggedIn, fetchFacilities, fetchReservers, fetchReservations]);
 
+  // カレンダーの月（currentDate）と集計レポートの対象月（reportMonth）を連動させる
+  useEffect(() => {
+    const y = currentDate.getFullYear();
+    const m = String(currentDate.getMonth() + 1).padStart(2, '0');
+    setReportMonth(`${y}-${m}`);
+  }, [currentDate]);
+
   useEffect(() => {
     if (isLoggedIn) {
       Promise.resolve().then(() => {
