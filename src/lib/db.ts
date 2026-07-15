@@ -6,43 +6,50 @@ import path from 'path';
 import crypto from 'crypto';
 import { calculateFees } from './calculator';
 
-const KV_REDIS_URL = process.env.KV_REDIS_URL;
-const KV_REST_API_URL = process.env.KV_REST_API_URL;
-const KV_REST_API_TOKEN = process.env.KV_REST_API_TOKEN;
-// Vercel KV 標準変数 (KV_REST_API_URL) または KV_REDIS_URL のいずれかが設定されていれば KV を使用する
-export const USE_MOCK = !KV_REDIS_URL && !KV_REST_API_URL;
+// 環境変数はビルド時ではなく実行時に評価する（Next.jsのビルド時インライン化を防ぐ）
+// USE_MOCKを定数ではなく関数にすることで、Vercelデプロイ時に正しく環境変数を読む
+export function getUseMock(): boolean {
+  // KV_REDIS_URL または KV_REST_API_URL のいずれかが設定されていれば KV を使用する
+  return !process.env.KV_REDIS_URL && !process.env.KV_REST_API_URL;
+}
 
-// KV クライアントを初期化する
-function initKVClient() {
-  // ① Vercel KV 標準環境変数 (REST) を優先する
-  if (KV_REST_API_URL && KV_REST_API_TOKEN) {
+// 後方互換性のため USE_MOCK も export（既存コードのため）
+// 重要: この値はモジュールロード時に評価されるため、Vercel本番ではなくビルド時の値になる可能性がある
+// 本番コードでは getUseMock() を直接呼び出すこと
+export const USE_MOCK = getUseMock();
+
+// KV クライアントのシングルトン（遅延初期化）
+// ビルド時ではなく最初のリクエスト時に環境変数を読んで初期化する
+let _kvInstance: ReturnType<typeof createKVClient> | null | undefined = undefined;
+
+function createKVClient() {
+  const kvRedisUrl = process.env.KV_REDIS_URL;
+  const kvRestApiUrl = process.env.KV_REST_API_URL;
+  const kvRestApiToken = process.env.KV_REST_API_TOKEN;
+
+  // Vercel KV 標準環境変数 (REST) を優先する
+  if (kvRestApiUrl && kvRestApiToken) {
     try {
-      return createClient({
-        url: KV_REST_API_URL,
-        token: KV_REST_API_TOKEN,
-      });
+      return createClient({ url: kvRestApiUrl, token: kvRestApiToken });
     } catch (error) {
       console.error('Error initializing KV client from KV_REST_API_URL:', error);
     }
   }
 
-  // ② KV_REDIS_URL から初期化する
-  if (!KV_REDIS_URL) return null;
+  if (!kvRedisUrl) return null;
+
   try {
-    if (KV_REDIS_URL.startsWith('redis://') || KV_REDIS_URL.startsWith('rediss://')) {
-      // TCP 接続用の通常の Redis (または Upstash Redis への TCP 接続)
-      // ioredis を使用して接続する
-      const redisClient = new Redis(KV_REDIS_URL, {
-        maxRetriesPerRequest: 1, // サーバーレス環境でのハングアップを避けるための設定
+    if (kvRedisUrl.startsWith('redis://') || kvRedisUrl.startsWith('rediss://')) {
+      // TCP 接続用 (ioredis)
+      const redisClient = new Redis(kvRedisUrl, {
+        maxRetriesPerRequest: 1,
         connectTimeout: 5000,
       });
 
-      // エラーイベントハンドラを登録（接続エラー等でプロセスがクラッシュするのを防ぐ）
       redisClient.on('error', (err) => {
         console.error('ioredis client connection error:', err);
       });
 
-      // @vercel/kv のインターフェース (get, set) と互換性のあるラッパーオブジェクトを返す
       return {
         get: async <T>(key: string): Promise<T | null> => {
           try {
@@ -66,11 +73,8 @@ function initKVClient() {
         }
       };
     } else {
-      // すでに https:// 形式 (Upstash REST API など)
-      return createClient({
-        url: KV_REDIS_URL,
-        token: KV_REST_API_TOKEN || '',
-      });
+      // https:// 形式 (Upstash REST API など)
+      return createClient({ url: kvRedisUrl, token: kvRestApiToken || '' });
     }
   } catch (error) {
     console.error('Error initializing KV client from KV_REDIS_URL:', error);
@@ -78,7 +82,23 @@ function initKVClient() {
   }
 }
 
-const kv = initKVClient();
+// KV クライアントをシングルトンで取得する（遅延初期化）
+function getKV() {
+  if (_kvInstance === undefined) {
+    _kvInstance = createKVClient();
+    if (_kvInstance !== null) {
+      const scheme = (process.env.KV_REDIS_URL || '').split('://')[0] || 'rest-api';
+      console.log('[KV] Client initialized. scheme:', scheme);
+    } else {
+      console.warn('[KV] No KV env vars found. Running in MOCK mode.');
+    }
+  }
+  return _kvInstance;
+}
+
+// kv は既存コードとの後方互換性エイリアス（USE_MOCKがfalseの場合のみ呼ばれる）
+const kv = { get: <T>(k: string) => getKV()!.get<T>(k), set: (k: string, v: unknown) => getKV()!.set(k, v) };
+
 
 const mockFacilitiesPath = path.join(process.cwd(), 'mock-data', 'facilities.json');
 const mockRecordsPath = path.join(process.cwd(), 'mock-data', 'records.json');
@@ -156,7 +176,7 @@ interface OldReservation {
 
 // 既存モックデータのマイグレーション処理
 function migrateMockDataIfNecessary() {
-  if (USE_MOCK) {
+  if (getUseMock()) {
     // facilities.json
     if (fs.existsSync(mockFacilitiesPath)) {
       try {
@@ -290,7 +310,7 @@ function writeMockData<T>(filePath: string, data: T[]): void {
 
 export async function getFacilities(): Promise<Facility[]> {
   let list: KVFacility[] = [];
-  if (USE_MOCK) {
+  if (getUseMock()) {
     list = readMockData<KVFacility>(mockFacilitiesPath);
   } else {
     try {
@@ -327,7 +347,7 @@ export async function addFacility(facility: Omit<Facility, 'id'>): Promise<Facil
     lst: newFacility.defaultLightStartTime,
   };
 
-  if (USE_MOCK) {
+  if (getUseMock()) {
     const list = readMockData<KVFacility>(mockFacilitiesPath);
     list.push(kvFac);
     writeMockData(mockFacilitiesPath, list);
@@ -350,7 +370,7 @@ export async function addFacility(facility: Omit<Facility, 'id'>): Promise<Facil
 export async function updateFacility(id: string, facility: Partial<Omit<Facility, 'id'>>): Promise<Facility | null> {
   let updatedFacility: Facility | null = null;
 
-  if (USE_MOCK) {
+  if (getUseMock()) {
     const list = readMockData<KVFacility>(mockFacilitiesPath);
     const index = list.findIndex((f) => f.id === id);
     if (index !== -1) {
@@ -435,7 +455,7 @@ export async function updateFacility(id: string, facility: Partial<Omit<Facility
 }
 
 export async function deleteFacility(id: string): Promise<boolean> {
-  if (USE_MOCK) {
+  if (getUseMock()) {
     const list = readMockData<KVFacility>(mockFacilitiesPath);
     const filtered = list.filter((f) => f.id !== id);
     if (list.length === filtered.length) return false;
@@ -465,7 +485,7 @@ export async function deleteFacility(id: string): Promise<boolean> {
 
 export async function getReservers(): Promise<Reserver[]> {
   let list: KVReserver[] = [];
-  if (USE_MOCK) {
+  if (getUseMock()) {
     list = readMockData<KVReserver>(mockReserversPath);
   } else {
     try {
@@ -495,7 +515,7 @@ export async function addReserver(name: string): Promise<Reserver> {
     ca: newReserver.createdAt,
   };
 
-  if (USE_MOCK) {
+  if (getUseMock()) {
     const list = readMockData<KVReserver>(mockReserversPath);
     list.push(kvRes);
     writeMockData(mockReserversPath, list);
@@ -516,7 +536,7 @@ export async function addReserver(name: string): Promise<Reserver> {
 }
 
 export async function deleteReserver(id: string): Promise<boolean> {
-  if (USE_MOCK) {
+  if (getUseMock()) {
     const list = readMockData<KVReserver>(mockReserversPath);
     const filtered = list.filter((r) => r.id !== id);
     if (list.length === filtered.length) return false;
@@ -546,7 +566,7 @@ export async function deleteReserver(id: string): Promise<boolean> {
 
 export async function getReservations(): Promise<Reservation[]> {
   let records: KVReservation[] = [];
-  if (USE_MOCK) {
+  if (getUseMock()) {
     records = readMockData<KVReservation>(mockRecordsPath);
   } else {
     try {
@@ -630,7 +650,7 @@ export async function addReservation(
     lst: reservation.lightStartTime,
   };
 
-  if (USE_MOCK) {
+  if (getUseMock()) {
     const list = readMockData<KVReservation>(mockRecordsPath);
     list.push(kvRec);
     writeMockData(mockRecordsPath, list);
@@ -689,7 +709,7 @@ export async function addReservation(
 export async function updateReservationSettlementStatus(id: string, settlementStatus: SettlementStatus): Promise<Reservation | null> {
   let kvRec: KVReservation | null = null;
 
-  if (USE_MOCK) {
+  if (getUseMock()) {
     const list = readMockData<KVReservation>(mockRecordsPath);
     const index = list.findIndex((r) => r.id === id);
     if (index !== -1) {
@@ -761,7 +781,7 @@ export async function updateReservationSettlementStatus(id: string, settlementSt
 export async function updateReservationCancelStatus(id: string, status: 'active' | 'cancelled'): Promise<Reservation | null> {
   let kvRec: KVReservation | null = null;
 
-  if (USE_MOCK) {
+  if (getUseMock()) {
     const list = readMockData<KVReservation>(mockRecordsPath);
     const index = list.findIndex((r) => r.id === id);
     if (index !== -1) {
@@ -831,7 +851,7 @@ export async function updateReservationCancelStatus(id: string, status: 'active'
 }
 
 export async function deleteReservation(id: string): Promise<boolean> {
-  if (USE_MOCK) {
+  if (getUseMock()) {
     const list = readMockData<KVReservation>(mockRecordsPath);
     const filtered = list.filter((r) => r.id !== id);
     if (list.length === filtered.length) return false;
@@ -856,7 +876,7 @@ export async function deleteReservation(id: string): Promise<boolean> {
 }
 
 export async function testKVConnection(): Promise<boolean> {
-  if (USE_MOCK || !kv) return false;
+  if (getUseMock() || !getKV()) return false;
   try {
     // 疎通確認として 'nighter:ping' を get してみる
     await kv.get('nighter:ping');
@@ -899,7 +919,7 @@ export async function updateReservation(
 
   let kvRec: KVReservation | null = null;
 
-  if (USE_MOCK) {
+  if (getUseMock()) {
     const list = readMockData<KVReservation>(mockRecordsPath);
     const index = list.findIndex((r) => r.id === id);
     if (index === -1) return null;
@@ -970,7 +990,7 @@ export async function updateReservationsStatusByReserverMonth(
   reserverName: string,
   status: SettlementStatus
 ): Promise<number> {
-  if (USE_MOCK) {
+  if (getUseMock()) {
     const list = readMockData<KVReservation>(mockRecordsPath);
     let count = 0;
     for (const r of list) {

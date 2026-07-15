@@ -10,18 +10,27 @@ export async function PATCH(
     const body = await req.json();
     const { settlementStatus, status } = body;
 
+    let settlementStatusVal = settlementStatus;
+    let statusVal = status;
+
+    // 過去互換処理: statusが精算ステータス（未精算/精算済）の場合はsettlementStatusValにマッピング
+    if (status === '未精算' || status === '精算済') {
+      settlementStatusVal = status;
+      statusVal = undefined;
+    }
+
     let updatedRecord;
 
-    if (settlementStatus !== undefined) {
-      if (settlementStatus !== '未精算' && settlementStatus !== '精算済') {
+    if (settlementStatusVal !== undefined) {
+      if (settlementStatusVal !== '未精算' && settlementStatusVal !== '精算済') {
         return NextResponse.json({ error: 'Invalid settlementStatus value' }, { status: 400 });
       }
-      updatedRecord = await updateReservationSettlementStatus(id, settlementStatus);
-    } else if (status !== undefined) {
-      if (status !== 'active' && status !== 'cancelled') {
+      updatedRecord = await updateReservationSettlementStatus(id, settlementStatusVal);
+    } else if (statusVal !== undefined) {
+      if (statusVal !== 'active' && statusVal !== 'cancelled') {
         return NextResponse.json({ error: 'Invalid status value' }, { status: 400 });
       }
-      updatedRecord = await updateReservationCancelStatus(id, status);
+      updatedRecord = await updateReservationCancelStatus(id, statusVal);
     } else {
       return NextResponse.json({ error: 'No valid status field provided' }, { status: 400 });
     }

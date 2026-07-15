@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { USE_MOCK, testKVConnection } from '@/lib/db';
+import { getUseMock, testKVConnection } from '@/lib/db';
 
 export async function GET() {
   const KV_REDIS_URL = process.env.KV_REDIS_URL;
@@ -14,8 +14,11 @@ export async function GET() {
     ? KV_REST_API_URL.split('://')[0] + '://'
     : null;
 
+  // 実行時に評価する（ビルド時の定数ではなく）
+  const useMock = getUseMock();
+
   const envInfo = {
-    USE_MOCK,
+    USE_MOCK: useMock,
     KV_REDIS_URL_set: !!KV_REDIS_URL,
     KV_REDIS_URL_scheme: kvRedisScheme,
     KV_REST_API_URL_set: !!KV_REST_API_URL,
@@ -25,7 +28,7 @@ export async function GET() {
   };
 
   // KV接続テスト
-  if (!USE_MOCK) {
+  if (!useMock) {
     try {
       // 疎通確認を試みる（タイムアウト5秒）
       const isConnected = await Promise.race([
