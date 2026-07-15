@@ -25,7 +25,8 @@ export async function PUT(req: NextRequest) {
       lightStartTime = '',
       feeType,
       memo = '',
-      status = '未精算',
+      settlementStatus = '未精算',
+      status = 'active',
     } = body;
 
     if (!id || !date || !facilityName || !reserverName || !courtStartTime || !courtEndTime || !feeType) {
@@ -48,6 +49,7 @@ export async function PUT(req: NextRequest) {
       lightStartTime,
       feeType,
       memo,
+      settlementStatus,
       status,
     });
 
@@ -98,7 +100,8 @@ export async function POST(req: NextRequest) {
       lightStartTime,
       feeType,
       memo,
-      status: '未精算',
+      settlementStatus: '未精算',
+      status: 'active',
     });
 
     return NextResponse.json(newRecord, { status: 201 });

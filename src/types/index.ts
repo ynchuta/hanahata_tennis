@@ -25,13 +25,14 @@ export interface Reservation {
   lightFee: number;
   totalFee: number;
   memo: string;         // 自由記入メモ
-  status: SettlementStatus;
+  settlementStatus: SettlementStatus;
+  status: 'active' | 'cancelled';
   createdAt: string;    // ISO String
 }
 
 export interface MonthlyReportRow {
   reserverName: string;
   totalAmount: number;
-  status: SettlementStatus;
+  settlementStatus: SettlementStatus;
   reservations: Reservation[];
 }

@@ -117,7 +117,8 @@ interface KVReservation {
   lh: number;  // lightHours
   ft: '大人' | '子供'; // feeType
   m: string;   // memo
-  s: '未精算' | '精算済'; // status
+  s: '未精算' | '精算済'; // settlementStatus
+  cs?: 'active' | 'cancelled'; // cancelStatus (未設定時は active)
   ca: string;  // createdAt
   lst?: string; // lightStartTime (HH:MM)
 }
@@ -597,7 +598,8 @@ export async function getReservations(): Promise<Reservation[]> {
       lightFee,
       totalFee,
       memo: r.m,
-      status: r.s,
+      settlementStatus: r.s,
+      status: r.cs || 'active',
       createdAt: r.ca,
     };
   });
@@ -622,7 +624,8 @@ export async function addReservation(
     lh: reservation.lightHours,
     ft: reservation.feeType,
     m: reservation.memo,
-    s: reservation.status,
+    s: reservation.settlementStatus,
+    cs: reservation.status || 'active',
     ca: createdAt,
     lst: reservation.lightStartTime,
   };
@@ -677,19 +680,20 @@ export async function addReservation(
     lightFee,
     totalFee,
     memo: reservation.memo,
-    status: reservation.status,
+    settlementStatus: reservation.settlementStatus,
+    status: reservation.status || 'active',
     createdAt,
   };
 }
 
-export async function updateReservationStatus(id: string, status: SettlementStatus): Promise<Reservation | null> {
+export async function updateReservationSettlementStatus(id: string, settlementStatus: SettlementStatus): Promise<Reservation | null> {
   let kvRec: KVReservation | null = null;
 
   if (USE_MOCK) {
     const list = readMockData<KVReservation>(mockRecordsPath);
     const index = list.findIndex((r) => r.id === id);
     if (index !== -1) {
-      list[index].s = status;
+      list[index].s = settlementStatus;
       writeMockData(mockRecordsPath, list);
       kvRec = list[index];
     }
@@ -698,16 +702,16 @@ export async function updateReservationStatus(id: string, status: SettlementStat
       const list = (await kv!.get<KVReservation[]>('nighter:recs')) || [];
       const index = list.findIndex((r) => r.id === id);
       if (index !== -1) {
-        list[index].s = status;
+        list[index].s = settlementStatus;
         await kv!.set('nighter:recs', list);
         kvRec = list[index];
       }
     } catch (error) {
-      console.error('Redis Error (updateReservationStatus), falling back to mock:', error);
+      console.error('Redis Error (updateReservationSettlementStatus), falling back to mock:', error);
       const list = readMockData<KVReservation>(mockRecordsPath);
       const index = list.findIndex((r) => r.id === id);
       if (index !== -1) {
-        list[index].s = status;
+        list[index].s = settlementStatus;
         writeMockData(mockRecordsPath, list);
         kvRec = list[index];
       }
@@ -748,7 +752,80 @@ export async function updateReservationStatus(id: string, status: SettlementStat
     lightFee,
     totalFee,
     memo: kvRec.m,
-    status: kvRec.s,
+    settlementStatus: kvRec.s,
+    status: kvRec.cs || 'active',
+    createdAt: kvRec.ca,
+  };
+}
+
+export async function updateReservationCancelStatus(id: string, status: 'active' | 'cancelled'): Promise<Reservation | null> {
+  let kvRec: KVReservation | null = null;
+
+  if (USE_MOCK) {
+    const list = readMockData<KVReservation>(mockRecordsPath);
+    const index = list.findIndex((r) => r.id === id);
+    if (index !== -1) {
+      list[index].cs = status;
+      writeMockData(mockRecordsPath, list);
+      kvRec = list[index];
+    }
+  } else {
+    try {
+      const list = (await kv!.get<KVReservation[]>('nighter:recs')) || [];
+      const index = list.findIndex((r) => r.id === id);
+      if (index !== -1) {
+        list[index].cs = status;
+        await kv!.set('nighter:recs', list);
+        kvRec = list[index];
+      }
+    } catch (error) {
+      console.error('Redis Error (updateReservationCancelStatus), falling back to mock:', error);
+      const list = readMockData<KVReservation>(mockRecordsPath);
+      const index = list.findIndex((r) => r.id === id);
+      if (index !== -1) {
+        list[index].cs = status;
+        writeMockData(mockRecordsPath, list);
+        kvRec = list[index];
+      }
+    }
+  }
+
+  if (!kvRec) return null;
+
+  const facilities = await getFacilities();
+  const facility = facilities.find((f) => f.id === kvRec!.fid) || {
+    id: kvRec!.fid,
+    name: '不明な施設',
+    adultRatePerHour: 0,
+    childRatePerHour: 0,
+    lightRatePerHour: 0,
+    allowChildRate: false,
+  };
+
+  const { courtFee, lightFee, totalFee } = calculateFees({
+    facility,
+    feeType: kvRec.ft,
+    courtStartTime: kvRec.st,
+    courtEndTime: kvRec.et,
+    lightHours: kvRec.lh,
+  });
+
+  return {
+    id: kvRec.id,
+    date: kvRec.d,
+    facilityName: facility.name,
+    reserverName: kvRec.rn,
+    courtStartTime: kvRec.st,
+    courtEndTime: kvRec.et,
+    lightHours: kvRec.lh,
+    lightStartTime: kvRec.lst,
+    feeType: kvRec.ft,
+    courtFee,
+    lightFee,
+    totalFee,
+    memo: kvRec.m,
+    settlementStatus: kvRec.s,
+    status: kvRec.cs || 'active',
     createdAt: kvRec.ca,
   };
 }
@@ -802,7 +879,8 @@ export async function updateReservation(
     lightStartTime?: string;
     feeType: '大人' | '子供';
     memo: string;
-    status: '未精算' | '精算済';
+    settlementStatus: SettlementStatus;
+    status: 'active' | 'cancelled';
   }
 ): Promise<Reservation | null> {
   const updatedKV: Partial<KVReservation> = {
@@ -814,7 +892,8 @@ export async function updateReservation(
     lh: data.lightHours,
     ft: data.feeType,
     m: data.memo,
-    s: data.status,
+    s: data.settlementStatus,
+    cs: data.status,
     lst: data.lightStartTime,
   };
 
@@ -880,7 +959,8 @@ export async function updateReservation(
     lightFee,
     totalFee,
     memo: kvRec.m,
-    status: kvRec.s,
+    settlementStatus: kvRec.s,
+    status: kvRec.cs || 'active',
     createdAt: kvRec.ca,
   };
 }

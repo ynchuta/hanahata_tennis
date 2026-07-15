@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { updateReservationStatus, deleteReservation } from '@/lib/db';
+import { updateReservationSettlementStatus, updateReservationCancelStatus, deleteReservation } from '@/lib/db';
 
 export async function PATCH(
   req: NextRequest,
@@ -8,13 +8,24 @@ export async function PATCH(
   try {
     const { id } = await params;
     const body = await req.json();
-    const { status } = body;
+    const { settlementStatus, status } = body;
 
-    if (status !== '未精算' && status !== '精算済') {
-      return NextResponse.json({ error: 'Invalid status value' }, { status: 400 });
+    let updatedRecord;
+
+    if (settlementStatus !== undefined) {
+      if (settlementStatus !== '未精算' && settlementStatus !== '精算済') {
+        return NextResponse.json({ error: 'Invalid settlementStatus value' }, { status: 400 });
+      }
+      updatedRecord = await updateReservationSettlementStatus(id, settlementStatus);
+    } else if (status !== undefined) {
+      if (status !== 'active' && status !== 'cancelled') {
+        return NextResponse.json({ error: 'Invalid status value' }, { status: 400 });
+      }
+      updatedRecord = await updateReservationCancelStatus(id, status);
+    } else {
+      return NextResponse.json({ error: 'No valid status field provided' }, { status: 400 });
     }
 
-    const updatedRecord = await updateReservationStatus(id, status);
     if (!updatedRecord) {
       return NextResponse.json({ error: 'Record not found' }, { status: 404 });
     }

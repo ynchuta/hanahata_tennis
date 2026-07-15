@@ -49,6 +49,8 @@ export default function Home() {
     lightStartTime: '',
     feeType: '大人' as FeeType,
     memo: '',
+    settlementStatus: '未精算' as SettlementStatus,
+    status: 'active' as 'active' | 'cancelled',
   });
 
   const [facilityForm, setFacilityForm] = useState({
@@ -229,6 +231,8 @@ export default function Home() {
             lightHours: calculatedHours,
             memo: '',
             feeType: (currentFacility && currentFacility.allowChildRate) ? '子供' : '大人',
+            settlementStatus: '未精算',
+            status: 'active',
           };
         });
         showToast(isEditing ? '予約を更新しました！' : '予約を保存しました！');
@@ -253,44 +257,71 @@ export default function Home() {
       lightStartTime: r.lightStartTime || '',
       feeType: r.feeType,
       memo: r.memo,
+      settlementStatus: r.settlementStatus,
+      status: r.status,
     });
     setEditingReservationId(r.id);
     setSelectedDateStr(r.date);
     setIsFormOpen(true);
   };
 
-  const handleToggleStatus = async (id: string, currentStatus: string) => {
+  const handleToggleStatus = async (id: string, currentStatus: SettlementStatus) => {
     const nextStatus = currentStatus === '未精算' ? '精算済' : '未精算';
-    setReservations((prev) => prev.map((r) => r.id === id ? { ...r, status: nextStatus } : r));
+    setReservations((prev) => prev.map((r) => r.id === id ? { ...r, settlementStatus: nextStatus } : r));
     showToast('ステータス更新中...', 0, true);
     try {
       const res = await fetch(`/api/records/${id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: nextStatus }),
+        body: JSON.stringify({ settlementStatus: nextStatus }),
       });
       if (res.ok) {
         const updated = await res.json();
         setReservations((prev) => prev.map((r) => r.id === id ? updated : r));
         showToast('精算ステータスを更新しました！');
       } else {
-        setReservations((prev) => prev.map((r) => r.id === id ? { ...r, status: currentStatus as SettlementStatus } : r));
+        setReservations((prev) => prev.map((r) => r.id === id ? { ...r, settlementStatus: currentStatus } : r));
         showToast('ステータス更新に失敗しました');
       }
     } catch (err) {
       console.error(err);
-      setReservations((prev) => prev.map((r) => r.id === id ? { ...r, status: currentStatus as SettlementStatus } : r));
+      setReservations((prev) => prev.map((r) => r.id === id ? { ...r, settlementStatus: currentStatus } : r));
       showToast('通信エラーが発生しました');
     }
   };
 
-  const handleToggleBulkStatus = async (reserverName: string, currentStatus: string) => {
+  const handleToggleCancel = async (id: string, currentCancelStatus: 'active' | 'cancelled') => {
+    const nextCancelStatus = currentCancelStatus === 'active' ? 'cancelled' : 'active';
+    setReservations((prev) => prev.map((r) => r.id === id ? { ...r, status: nextCancelStatus } : r));
+    showToast('キャンセルステータス更新中...', 0, true);
+    try {
+      const res = await fetch(`/api/records/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: nextCancelStatus }),
+      });
+      if (res.ok) {
+        const updated = await res.json();
+        setReservations((prev) => prev.map((r) => r.id === id ? updated : r));
+        showToast(nextCancelStatus === 'cancelled' ? '予約をキャンセルしました' : '予約を復元しました');
+      } else {
+        setReservations((prev) => prev.map((r) => r.id === id ? { ...r, status: currentCancelStatus } : r));
+        showToast('キャンセル処理に失敗しました');
+      }
+    } catch (err) {
+      console.error(err);
+      setReservations((prev) => prev.map((r) => r.id === id ? { ...r, status: currentCancelStatus } : r));
+      showToast('通信エラーが発生しました');
+    }
+  };
+
+  const handleToggleBulkStatus = async (reserverName: string, currentStatus: SettlementStatus) => {
     const nextStatus = currentStatus === '未精算' ? '精算済' : '未精算';
     // 楽観的 UI アップデート（該当月と保護者名の予約レコードを即座に書き換える）
     setReservations((prev) =>
       prev.map((r) =>
         (r.date.startsWith(reportMonth) && r.reserverName === reserverName)
-          ? { ...r, status: nextStatus }
+          ? { ...r, settlementStatus: nextStatus }
           : r
       )
     );
@@ -302,7 +333,7 @@ export default function Home() {
         body: JSON.stringify({
           month: reportMonth,
           reserverName,
-          status: nextStatus,
+          settlementStatus: nextStatus,
         }),
       });
       if (res.ok) {
@@ -521,6 +552,7 @@ export default function Home() {
       text += `👤 ${parent.reserverName}さん\n`;
 
       for (const r of parent.reservations) {
+        if (r.status === 'cancelled') continue;
         const dateParts = r.date.split('-');
         const dateLabel = `${parseInt(dateParts[1], 10)}/${parseInt(dateParts[2], 10)}`;
         const durationMinutes = (() => {
@@ -708,13 +740,16 @@ export default function Home() {
                       {dayReservations.length > 0 && isCurrentMonth && (
                         <div className="day-reserver-list">
                           {dayReservations.slice(0, 3).map((r) => {
+                            const isCancelled = r.status === 'cancelled';
                             const lastName = getLastName(r.reserverName);
                             // セル幅に収めるためさらに短縮
-                            const displayName = lastName.length > 3 ? lastName.slice(0, 2) + '…' : lastName;
+                            const baseName = lastName.length > 3 ? lastName.slice(0, 2) + '…' : lastName;
+                            const displayName = isCancelled ? `(消)${baseName}` : baseName;
                             return (
                               <span
                                 key={r.id}
-                                className={`day-reserver-name ${r.status === '精算済' ? 'settled' : 'unsettled'}`}
+                                className={`day-reserver-name ${r.settlementStatus === '精算済' ? 'settled' : 'unsettled'}`}
+                                style={{ opacity: isCancelled ? 0.4 : 1 }}
                               >
                                 {displayName}
                               </span>
@@ -903,91 +938,116 @@ export default function Home() {
               </p>
             ) : (
               <div>
-                {currentDayReservations.map((r) => (
-                  <div key={r.id} className="reservation-item">
-                    <div className="reservation-item-header">
-                      <div>
-                        <span className="reserver-name">{r.reserverName}</span>
-                        <div style={{ marginTop: '0.25rem' }}>
-                          <span className="facility-badge">{r.facilityName}</span>
-                          <span
-                            className="status-badge"
-                            style={{
-                              marginLeft: '0.5rem',
-                              background: r.feeType === '大人' ? 'rgba(139, 92, 246, 0.15)' : 'rgba(16, 185, 129, 0.15)',
-                              color: r.feeType === '大人' ? 'var(--color-primary)' : 'var(--color-success)',
-                              border: r.feeType === '大人' ? '1px solid rgba(139, 92, 246, 0.3)' : '1px solid rgba(16, 185, 129, 0.3)',
-                            }}
-                          >
-                            {r.feeType}
-                          </span>
-                        </div>
-                      </div>
-                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '0.5rem' }}>
-                        <div className="settlement-checkbox-wrapper">
-                          <span style={{ fontSize: '0.85rem', color: r.status === '精算済' ? 'var(--color-success)' : 'var(--color-accent)' }}>
-                            {r.status}
-                          </span>
-                          <label className="switch">
-                            <input type="checkbox" checked={r.status === '精算済'} onChange={() => handleToggleStatus(r.id, r.status)} />
-                            <span className="slider"></span>
-                          </label>
-                        </div>
-                        <div style={{ display: 'flex', gap: '0.35rem' }}>
-                          {/* 予約編集ボタン */}
-                          <button
-                            className="btn btn-secondary"
-                            style={{
-                              width: 'auto',
-                              padding: '4px 8px',
-                              fontSize: '0.7rem',
-                              color: 'var(--color-secondary)',
-                              borderColor: 'rgba(6,182,212,0.3)',
-                              background: 'rgba(6,182,212,0.03)',
-                            }}
-                            onClick={() => handleEditReservation(r)}
-                          >
-                            編集
-                          </button>
-                          {/* 予約削除ボタン */}
-                          <button
-                            className="btn btn-secondary"
-                            style={{
-                              width: 'auto',
-                              padding: '4px 8px',
-                              fontSize: '0.7rem',
-                              color: 'var(--color-accent)',
-                              borderColor: 'rgba(244,63,94,0.3)',
-                              background: 'rgba(244,63,94,0.03)',
-                            }}
-                            onClick={() => handleDeleteReservation(r.id)}
-                          >
-                            削除
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="reservation-time-details">
-                      <div>コート時間: {r.courtStartTime} 〜 {r.courtEndTime}</div>
-                      {r.lightHours > 0 && (
+                {currentDayReservations.map((r) => {
+                  const isCancelled = r.status === 'cancelled';
+                  return (
+                    <div
+                      key={r.id}
+                      className="reservation-item"
+                      style={{
+                        opacity: isCancelled ? 0.5 : 1,
+                        textDecoration: isCancelled ? 'line-through' : 'none',
+                      }}
+                    >
+                      <div className="reservation-item-header">
                         <div>
-                          照明: {r.lightHours}時間 (点灯開始: {r.lightStartTime || '設定なし'})
+                          <span className="reserver-name">{r.reserverName}</span>
+                          <div style={{ marginTop: '0.25rem' }}>
+                            <span className="facility-badge">{r.facilityName}</span>
+                            <span
+                              className="status-badge"
+                              style={{
+                                marginLeft: '0.5rem',
+                                background: r.feeType === '大人' ? 'rgba(139, 92, 246, 0.15)' : 'rgba(16, 185, 129, 0.15)',
+                                color: r.feeType === '大人' ? 'var(--color-primary)' : 'var(--color-success)',
+                                border: r.feeType === '大人' ? '1px solid rgba(139, 92, 246, 0.3)' : '1px solid rgba(16, 185, 129, 0.3)',
+                              }}
+                            >
+                              {r.feeType}
+                            </span>
+                          </div>
                         </div>
-                      )}
-                    </div>
-
-                    <div className="reservation-fees">
-                      <div style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)' }}>
-                        コート: {r.courtFee.toLocaleString()}円
-                        {r.lightFee > 0 && ` | 照明: ${r.lightFee.toLocaleString()}円`}
+                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '0.5rem' }}>
+                          <div className="settlement-checkbox-wrapper">
+                            <span style={{ fontSize: '0.85rem', color: r.settlementStatus === '精算済' ? 'var(--color-success)' : 'var(--color-accent)' }}>
+                              {r.settlementStatus}
+                            </span>
+                            <label className="switch">
+                              <input type="checkbox" checked={r.settlementStatus === '精算済'} onChange={() => handleToggleStatus(r.id, r.settlementStatus)} />
+                              <span className="slider"></span>
+                            </label>
+                          </div>
+                          <div style={{ display: 'flex', gap: '0.35rem' }}>
+                            {/* キャンセル/復元ボタン */}
+                            <button
+                              className="btn btn-secondary"
+                              style={{
+                                width: 'auto',
+                                padding: '4px 8px',
+                                fontSize: '0.7rem',
+                                color: isCancelled ? 'var(--color-success)' : 'var(--color-text-muted)',
+                                borderColor: isCancelled ? 'rgba(16,185,129,0.3)' : 'rgba(255,255,255,0.15)',
+                                background: isCancelled ? 'rgba(16,185,129,0.03)' : 'rgba(255,255,255,0.01)',
+                              }}
+                              onClick={() => handleToggleCancel(r.id, r.status)}
+                            >
+                              {isCancelled ? '予約を戻す' : 'キャンセル'}
+                            </button>
+                            {/* 予約編集ボタン */}
+                            <button
+                              className="btn btn-secondary"
+                              style={{
+                                width: 'auto',
+                                padding: '4px 8px',
+                                fontSize: '0.7rem',
+                                color: 'var(--color-secondary)',
+                                borderColor: 'rgba(6,182,212,0.3)',
+                                background: 'rgba(6,182,212,0.03)',
+                              }}
+                              onClick={() => handleEditReservation(r)}
+                            >
+                              編集
+                            </button>
+                            {/* 予約削除ボタン */}
+                            <button
+                              className="btn btn-secondary"
+                              style={{
+                                width: 'auto',
+                                padding: '4px 8px',
+                                fontSize: '0.7rem',
+                                color: 'var(--color-accent)',
+                                borderColor: 'rgba(244,63,94,0.3)',
+                                background: 'rgba(244,63,94,0.03)',
+                              }}
+                              onClick={() => handleDeleteReservation(r.id)}
+                            >
+                              削除
+                            </button>
+                          </div>
+                        </div>
                       </div>
-                      <div className="fee-total">合計: {r.totalFee.toLocaleString()}円</div>
-                    </div>
 
-                    {r.memo && <div className="reservation-memo">📝 {r.memo}</div>}
-                  </div>
-                ))}
+                      <div className="reservation-time-details">
+                        <div>コート時間: {r.courtStartTime} 〜 {r.courtEndTime}</div>
+                        {r.lightHours > 0 && (
+                          <div>
+                            照明: {r.lightHours}時間 (点灯開始: {r.lightStartTime || '設定なし'})
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="reservation-fees">
+                        <div style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)' }}>
+                          コート: {r.courtFee.toLocaleString()}円
+                          {r.lightFee > 0 && ` | 照明: ${r.lightFee.toLocaleString()}円`}
+                        </div>
+                        <div className="fee-total">合計: {r.totalFee.toLocaleString()}円</div>
+                      </div>
+
+                      {r.memo && <div className="reservation-memo">📝 {r.memo}</div>}
+                    </div>
+                  );
+                })}
               </div>
             )}
           </div>
@@ -1042,14 +1102,14 @@ export default function Home() {
                             {parent.totalAmount.toLocaleString()}円
                           </span>
                           <div className="settlement-checkbox-wrapper">
-                            <span className={`status-badge ${parent.status === '精算済' ? 'settled' : 'unsettled'}`}>
-                              {parent.status}
+                            <span className={`status-badge ${parent.settlementStatus === '精算済' ? 'settled' : 'unsettled'}`}>
+                              {parent.settlementStatus}
                             </span>
                             <label className="switch">
                               <input
                                 type="checkbox"
-                                checked={parent.status === '精算済'}
-                                onChange={() => handleToggleBulkStatus(parent.reserverName, parent.status)}
+                                checked={parent.settlementStatus === '精算済'}
+                                onChange={() => handleToggleBulkStatus(parent.reserverName, parent.settlementStatus)}
                               />
                               <span className="slider"></span>
                             </label>
@@ -1060,40 +1120,45 @@ export default function Home() {
                       {isOpen && (
                         <div className="accordion-content">
                           <div style={{ padding: '0.5rem 0', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-                            {parent.reservations.map((r) => (
-                              <div
-                                key={r.id}
-                                style={{
-                                  padding: '0.5rem 0',
-                                  borderBottom: '1px solid rgba(255, 255, 255, 0.05)',
-                                }}
-                              >
-                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.9rem' }}>
-                                  <div>
-                                    <div style={{ fontWeight: 500 }}>
-                                      {r.date.replace(/-/g, '/')} <span className="facility-badge" style={{ fontSize: '0.72rem' }}>{r.facilityName}</span>
-                                    </div>
-                                    <div style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)', marginTop: '0.2' }}>
-                                      {r.courtStartTime}〜{r.courtEndTime}
-                                      {r.lightHours > 0 && ` | 照明${r.lightHours}時間 (${r.lightStartTime || ''}〜)`}
-                                      {' | '}{r.feeType}
-                                    </div>
-                                    {r.memo && (
-                                      <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', marginTop: '0.2rem' }}>
-                                        📝 {r.memo}
+                            {parent.reservations.map((r) => {
+                              const isCancelled = r.status === 'cancelled';
+                              return (
+                                <div
+                                  key={r.id}
+                                  style={{
+                                    padding: '0.5rem 0',
+                                    borderBottom: '1px solid rgba(255, 255, 255, 0.05)',
+                                    opacity: isCancelled ? 0.5 : 1,
+                                    textDecoration: isCancelled ? 'line-through' : 'none',
+                                  }}
+                                >
+                                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.9rem' }}>
+                                    <div>
+                                      <div style={{ fontWeight: 500 }}>
+                                        {isCancelled ? '（消）' : ''}{r.date.replace(/-/g, '/')} <span className="facility-badge" style={{ fontSize: '0.72rem' }}>{r.facilityName}</span>
                                       </div>
-                                    )}
-                                  </div>
-                                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexShrink: 0 }}>
-                                    <span style={{ fontWeight: 600 }}>{r.totalFee.toLocaleString()}円</span>
-                                    <label className="switch">
-                                      <input type="checkbox" checked={r.status === '精算済'} onChange={() => handleToggleStatus(r.id, r.status)} />
-                                      <span className="slider"></span>
-                                    </label>
+                                      <div style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)', marginTop: '0.2' }}>
+                                        {r.courtStartTime}〜{r.courtEndTime}
+                                        {r.lightHours > 0 && ` | 照明${r.lightHours}時間 (${r.lightStartTime || ''}〜)`}
+                                        {' | '}{r.feeType}
+                                      </div>
+                                      {r.memo && (
+                                        <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', marginTop: '0.2rem' }}>
+                                          📝 {r.memo}
+                                        </div>
+                                      )}
+                                    </div>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexShrink: 0 }}>
+                                      <span style={{ fontWeight: 600 }}>{r.totalFee.toLocaleString()}円</span>
+                                      <label className="switch">
+                                        <input type="checkbox" checked={r.settlementStatus === '精算済'} onChange={() => handleToggleStatus(r.id, r.settlementStatus)} />
+                                        <span className="slider"></span>
+                                      </label>
+                                    </div>
                                   </div>
                                 </div>
-                              </div>
-                            ))}
+                              );
+                            })}
                           </div>
                         </div>
                       )}

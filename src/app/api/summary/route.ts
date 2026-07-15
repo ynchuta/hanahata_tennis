@@ -26,16 +26,19 @@ export async function GET(req: NextRequest) {
     }
 
     const report: MonthlyReportRow[] = Array.from(summaryMap.entries()).map(([reserverName, list]) => {
-      // 立替合計金額を計算
-      const totalAmount = list.reduce((sum, r) => sum + r.totalFee, 0);
+      // 立替合計金額を計算 (status === "cancelled" のデータは除外)
+      const activeList = list.filter((r) => r.status !== 'cancelled');
+      const totalAmount = activeList.reduce((sum, r) => sum + r.totalFee, 0);
 
-      // その月のすべての予約が精算済みかどうかを判定
-      const status = list.every((r) => r.status === '精算済') ? '精算済' : '未精算';
+      // その月のすべての有効な予約が精算済みかどうかを判定
+      const settlementStatus = activeList.length > 0
+        ? (activeList.every((r) => r.settlementStatus === '精算済') ? '精算済' : '未精算')
+        : '精算済';
 
       return {
         reserverName,
         totalAmount,
-        status,
+        settlementStatus,
         reservations: list.sort((a, b) => a.date.localeCompare(b.date)),
       };
     });
@@ -51,18 +54,18 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { month, reserverName, status } = body;
+    const { month, reserverName, settlementStatus } = body;
 
-    if (!month || !reserverName || !status) {
+    if (!month || !reserverName || !settlementStatus) {
       return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
     }
 
-    if (status !== '未精算' && status !== '精算済') {
-      return NextResponse.json({ error: 'Invalid status value' }, { status: 400 });
+    if (settlementStatus !== '未精算' && settlementStatus !== '精算済') {
+      return NextResponse.json({ error: 'Invalid settlementStatus value' }, { status: 400 });
     }
 
     const { updateReservationsStatusByReserverMonth } = await import('@/lib/db');
-    const count = await updateReservationsStatusByReserverMonth(month, reserverName, status);
+    const count = await updateReservationsStatusByReserverMonth(month, reserverName, settlementStatus);
 
     return NextResponse.json({ success: true, updatedCount: count });
   } catch (error) {
