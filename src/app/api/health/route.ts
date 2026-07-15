@@ -2,32 +2,22 @@ import { NextResponse } from 'next/server';
 import { getUseMock, testKVConnection } from '@/lib/db';
 
 export async function GET() {
-  const KV_REDIS_URL = process.env.KV_REDIS_URL;
-  const KV_REST_API_URL = process.env.KV_REST_API_URL;
-  const KV_REST_API_TOKEN = process.env.KV_REST_API_TOKEN;
+  const SPREADSHEET_ID = process.env.SPREADSHEET_ID;
+  const GOOGLE_SERVICE_ACCOUNT_EMAIL = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
+  const GOOGLE_PRIVATE_KEY = process.env.GOOGLE_PRIVATE_KEY;
 
-  // URLの先頭スキームだけ確認（秘密情報は返さない）
-  const kvRedisScheme = KV_REDIS_URL
-    ? KV_REDIS_URL.split('://')[0] + '://'
-    : null;
-  const kvRestScheme = KV_REST_API_URL
-    ? KV_REST_API_URL.split('://')[0] + '://'
-    : null;
-
-  // 実行時に評価する（ビルド時の定数ではなく）
+  // 実行時に評価する
   const useMock = getUseMock();
 
   const envInfo = {
     USE_MOCK: useMock,
-    KV_REDIS_URL_set: !!KV_REDIS_URL,
-    KV_REDIS_URL_scheme: kvRedisScheme,
-    KV_REST_API_URL_set: !!KV_REST_API_URL,
-    KV_REST_API_URL_scheme: kvRestScheme,
-    KV_REST_API_TOKEN_set: !!KV_REST_API_TOKEN,
+    SPREADSHEET_ID_set: !!SPREADSHEET_ID,
+    GOOGLE_SERVICE_ACCOUNT_EMAIL_set: !!GOOGLE_SERVICE_ACCOUNT_EMAIL,
+    GOOGLE_PRIVATE_KEY_set: !!GOOGLE_PRIVATE_KEY,
     NODE_ENV: process.env.NODE_ENV,
   };
 
-  // KV接続テスト（タイムアウト5秒）
+  // Google Sheets 接続テスト（タイムアウト5秒）
   if (!useMock) {
     try {
       const errorMsg = await Promise.race([
@@ -39,16 +29,16 @@ export async function GET() {
 
       if (errorMsg === null) {
         // null = 接続成功
-        return NextResponse.json({ status: 'ok', kv: 'connected', ...envInfo });
+        return NextResponse.json({ status: 'ok', db: 'connected', ...envInfo });
       } else {
         // string = エラーメッセージ
-        return NextResponse.json({ status: 'error', kv: 'failed', error: errorMsg, ...envInfo });
+        return NextResponse.json({ status: 'error', db: 'failed', error: errorMsg, ...envInfo });
       }
     } catch (err: unknown) {
       const errMsg = err instanceof Error ? err.message : String(err);
-      return NextResponse.json({ status: 'error', kv: 'failed', error: errMsg, ...envInfo });
+      return NextResponse.json({ status: 'error', db: 'failed', error: errMsg, ...envInfo });
     }
   }
 
-  return NextResponse.json({ status: 'ok', kv: 'mock_mode', ...envInfo });
+  return NextResponse.json({ status: 'ok', db: 'mock_mode', ...envInfo });
 }
