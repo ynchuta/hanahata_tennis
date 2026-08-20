@@ -258,10 +258,10 @@ export default function Home() {
     setFormData({
       facilityName: r.facilityName,
       reserverName: r.reserverName,
-      courtStartTime: r.courtStartTime,
-      courtEndTime: r.courtEndTime,
+      courtStartTime: r.courtStartTime ? r.courtStartTime.slice(0, 5) : '',
+      courtEndTime: r.courtEndTime ? r.courtEndTime.slice(0, 5) : '',
       lightHours: r.lightHours,
-      lightStartTime: r.lightStartTime || '',
+      lightStartTime: r.lightStartTime ? r.lightStartTime.slice(0, 5) : '',
       feeType: r.feeType,
       memo: r.memo,
       settlementStatus: r.settlementStatus,

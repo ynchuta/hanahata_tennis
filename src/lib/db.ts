@@ -67,6 +67,15 @@ interface KVReservation {
   lst?: string; // lightStartTime (HH:MM)
 }
 
+export function formatTime(timeStr: string | undefined): string {
+  if (!timeStr) return '';
+  const parts = timeStr.trim().split(':');
+  if (parts.length >= 2) {
+    return `${parts[0].padStart(2, '0')}:${parts[1].padStart(2, '0')}`;
+  }
+  return timeStr;
+}
+
 // モックデータ読み書きヘルパー
 function readMockData<T>(filePath: string): T[] {
   try {
@@ -576,10 +585,10 @@ export async function getReservations(): Promise<Reservation[]> {
       date: r.d,
       facilityName: facility.name,
       reserverName: r.rn,
-      courtStartTime: r.st,
-      courtEndTime: r.et,
+      courtStartTime: formatTime(r.st),
+      courtEndTime: formatTime(r.et),
       lightHours: r.lh,
-      lightStartTime: r.lst,
+      lightStartTime: r.lst ? formatTime(r.lst) : undefined,
       feeType: r.ft,
       courtFee,
       lightFee,
@@ -679,10 +688,10 @@ export async function addReservation(
     date: reservation.date,
     facilityName: facility.name,
     reserverName: reservation.reserverName,
-    courtStartTime: reservation.courtStartTime,
-    courtEndTime: reservation.courtEndTime,
+    courtStartTime: formatTime(reservation.courtStartTime),
+    courtEndTime: formatTime(reservation.courtEndTime),
     lightHours: reservation.lightHours,
-    lightStartTime: reservation.lightStartTime,
+    lightStartTime: reservation.lightStartTime ? formatTime(reservation.lightStartTime) : undefined,
     feeType: reservation.feeType,
     courtFee,
     lightFee,
@@ -788,10 +797,10 @@ export async function updateReservationSettlementStatus(id: string, settlementSt
     date: kvRec.d,
     facilityName: facility.name,
     reserverName: kvRec.rn,
-    courtStartTime: kvRec.st,
-    courtEndTime: kvRec.et,
+    courtStartTime: formatTime(kvRec.st),
+    courtEndTime: formatTime(kvRec.et),
     lightHours: kvRec.lh,
-    lightStartTime: kvRec.lst,
+    lightStartTime: kvRec.lst ? formatTime(kvRec.lst) : undefined,
     feeType: kvRec.ft,
     courtFee,
     lightFee,
@@ -897,10 +906,10 @@ export async function updateReservationCancelStatus(id: string, status: 'active'
     date: kvRec.d,
     facilityName: facility.name,
     reserverName: kvRec.rn,
-    courtStartTime: kvRec.st,
-    courtEndTime: kvRec.et,
+    courtStartTime: formatTime(kvRec.st),
+    courtEndTime: formatTime(kvRec.et),
     lightHours: kvRec.lh,
-    lightStartTime: kvRec.lst,
+    lightStartTime: kvRec.lst ? formatTime(kvRec.lst) : undefined,
     feeType: kvRec.ft,
     courtFee,
     lightFee,
@@ -1106,10 +1115,10 @@ export async function updateReservation(
     date: kvRec.d,
     facilityName: facility.name,
     reserverName: kvRec.rn,
-    courtStartTime: kvRec.st,
-    courtEndTime: kvRec.et,
+    courtStartTime: formatTime(kvRec.st),
+    courtEndTime: formatTime(kvRec.et),
     lightHours: kvRec.lh,
-    lightStartTime: kvRec.lst,
+    lightStartTime: kvRec.lst ? formatTime(kvRec.lst) : undefined,
     feeType: kvRec.ft,
     courtFee,
     lightFee,
