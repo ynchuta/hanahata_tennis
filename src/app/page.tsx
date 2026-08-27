@@ -55,13 +55,17 @@ export default function Home() {
     status: 'active' as 'active' | 'cancelled',
   });
 
+  // 会計分類リスト（自由に追加・編集できるよう状態変数で管理）
+  const [categories, setCategories] = useState<string[]>(['雑費', 'その他']);
+  const [newCategoryName, setNewCategoryName] = useState('');
+
   // 会計フォームステート
   const [ledgerForm, setLedgerForm] = useState({
     date: toLocalDateStr(new Date()),
     description: '',
     type: 'expense' as 'income' | 'expense',
     amount: 0,
-    category: '備品購入',
+    category: '雑費',
   });
 
   const [facilityForm, setFacilityForm] = useState({
@@ -154,6 +158,19 @@ export default function Home() {
         setIsLoggedIn(true);
       });
     }
+    // 会計分類の初期読み込み
+    const savedCategories = localStorage.getItem('nighter_ledger_categories');
+    if (savedCategories) {
+      try {
+        const parsed = JSON.parse(savedCategories);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setCategories(parsed);
+          setLedgerForm((prev) => ({ ...prev, category: parsed[0] }));
+        }
+      } catch (e) {
+        console.error('Failed to parse saved ledger categories:', e);
+      }
+    }
     Promise.resolve().then(() => {
       setIsAuthChecking(false);
     });
@@ -220,6 +237,40 @@ export default function Home() {
       setLoginId('');
       setLoginPassword('');
       setLoginError('');
+    }
+  };
+
+  // 会計分類の追加
+  const handleAddCategory = (e: React.FormEvent) => {
+    e.preventDefault();
+    const cleanName = newCategoryName.trim();
+    if (!cleanName) return;
+    if (categories.includes(cleanName)) {
+      showToast('その分類は既に登録されています');
+      return;
+    }
+    const updated = [...categories, cleanName];
+    setCategories(updated);
+    localStorage.setItem('nighter_ledger_categories', JSON.stringify(updated));
+    setLedgerForm((prev) => ({ ...prev, category: cleanName }));
+    setNewCategoryName('');
+    showToast(`分類「${cleanName}」を追加しました`);
+  };
+
+  // 会計分類の削除
+  const handleDeleteCategory = (catToDelete: string) => {
+    if (categories.length <= 1) {
+      showToast('分類は最低1つ必要です');
+      return;
+    }
+    if (confirm(`分類「${catToDelete}」を削除しますか？\n※既存の履歴に登録されている分類名はそのまま残ります。`)) {
+      const updated = categories.filter((c) => c !== catToDelete);
+      setCategories(updated);
+      localStorage.setItem('nighter_ledger_categories', JSON.stringify(updated));
+      if (ledgerForm.category === catToDelete) {
+        setLedgerForm((prev) => ({ ...prev, category: updated[0] }));
+      }
+      showToast(`分類「${catToDelete}」を削除しました`);
     }
   };
 
@@ -1314,12 +1365,11 @@ export default function Home() {
                     value={ledgerForm.category}
                     onChange={(e) => setLedgerForm((prev) => ({ ...prev, category: e.target.value }))}
                   >
-                    <option value="部費">部費</option>
-                    <option value="コート代返金">コート代返金</option>
-                    <option value="備品購入">備品購入</option>
-                    <option value="大会参加費">大会参加費</option>
-                    <option value="前年度繰越">前年度繰越</option>
-                    <option value="その他">その他</option>
+                    {categories.map((cat) => (
+                      <option key={cat} value={cat}>
+                        {cat}
+                      </option>
+                    ))}
                   </select>
                 </div>
                 <div className="form-group">
@@ -1591,6 +1641,41 @@ export default function Home() {
                   ))}
                 </div>
               )}
+            </div>
+          </div>
+
+          {/* 会計分類設定 */}
+          <div className="card">
+            <h3 style={{ marginBottom: '1.25rem', color: 'var(--color-secondary)' }}>会計分類設定</h3>
+
+            <form onSubmit={handleAddCategory} style={{ display: 'flex', gap: '0.5rem', marginBottom: '1.5rem' }}>
+              <input
+                type="text"
+                className="form-input"
+                required
+                placeholder="新しい分類名 (例: 備品購入)"
+                value={newCategoryName}
+                onChange={(e) => setNewCategoryName(e.target.value)}
+              />
+              <button type="submit" className="btn btn-primary" style={{ width: 'auto', whiteSpace: 'nowrap' }}>分類を追加</button>
+            </form>
+
+            <div>
+              <h4 style={{ marginBottom: '0.75rem', fontSize: '0.95rem' }}>登録済み分類一覧</h4>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                {categories.map((cat) => (
+                  <div key={cat} className="reservation-item" style={{ margin: 0, padding: '0.5rem 0.75rem' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span style={{ fontWeight: 500 }}>{cat}</span>
+                      <button
+                        className="btn btn-secondary"
+                        style={{ width: 'auto', padding: '4px 10px', fontSize: '0.75rem', color: 'var(--color-accent)', borderColor: 'rgba(244,63,94,0.3)' }}
+                        onClick={() => handleDeleteCategory(cat)}
+                      >削除</button>
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
           </div>
         </section>

@@ -1224,7 +1224,7 @@ export async function getLedgerRecords(): Promise<LedgerRecord[]> {
       description: l.desc,
       income: l.i,
       expense: l.e,
-      category: l.cat,
+      category: l.cat || 'その他',
       balance: l.b,
       createdAt: l.ca,
     }));
@@ -1246,7 +1246,7 @@ export async function getLedgerRecords(): Promise<LedgerRecord[]> {
       description: row[2],
       income: Number(row[3]) || 0,
       expense: Number(row[4]) || 0,
-      category: row[5],
+      category: row[5] || 'その他',
       balance: Number(row[6]) || 0,
       createdAt: row[7],
     }));
@@ -1259,7 +1259,7 @@ export async function getLedgerRecords(): Promise<LedgerRecord[]> {
       description: l.desc,
       income: l.i,
       expense: l.e,
-      category: l.cat,
+      category: l.cat || 'その他',
       balance: l.b,
       createdAt: l.ca,
     }));
