@@ -1,5 +1,5 @@
 import { google } from 'googleapis';
-import { Facility, Reservation, SettlementStatus } from '../types';
+import { Facility, Reservation, SettlementStatus, LedgerRecord } from '../types';
 import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
@@ -27,6 +27,7 @@ export const USE_MOCK = getUseMock();
 const mockFacilitiesPath = path.join(process.cwd(), 'mock-data', 'facilities.json');
 const mockRecordsPath = path.join(process.cwd(), 'mock-data', 'records.json');
 const mockReserversPath = path.join(process.cwd(), 'mock-data', 'reservers.json');
+const mockLedgerPath = path.join(process.cwd(), 'mock-data', 'ledger.json');
 
 export interface Reserver {
   id: string;
@@ -1198,3 +1199,145 @@ export async function updateReservationsStatusByReserverMonth(
     return 0;
   }
 }
+
+/* =========================================================================
+   会計管理 (Ledger)
+   ========================================================================= */
+
+interface KVLedgerRecord {
+  id: string;
+  d: string;   // date YYYY-MM-DD
+  desc: string; // description
+  i: number;   // income
+  e: number;   // expense
+  cat: string; // category
+  b: number;   // balance
+  ca: string;  // createdAt
+}
+
+export async function getLedgerRecords(): Promise<LedgerRecord[]> {
+  if (getUseMock()) {
+    const list = readMockData<KVLedgerRecord>(mockLedgerPath);
+    return list.map((l) => ({
+      id: l.id,
+      date: l.d,
+      description: l.desc,
+      income: l.i,
+      expense: l.e,
+      category: l.cat,
+      balance: l.b,
+      createdAt: l.ca,
+    }));
+  }
+
+  try {
+    const sheets = getSheetsClient();
+    const response = await sheets.spreadsheets.values.get({
+      spreadsheetId: SPREADSHEET_ID,
+      range: 'ledger!A2:H',
+    });
+
+    const rows = response.data.values;
+    if (!rows || rows.length === 0) return [];
+
+    return rows.map((row: any) => ({
+      id: row[0],
+      date: row[1],
+      description: row[2],
+      income: Number(row[3]) || 0,
+      expense: Number(row[4]) || 0,
+      category: row[5],
+      balance: Number(row[6]) || 0,
+      createdAt: row[7],
+    }));
+  } catch (error) {
+    console.error('Google Sheets API Error (getLedgerRecords), falling back to mock:', error);
+    const list = readMockData<KVLedgerRecord>(mockLedgerPath);
+    return list.map((l) => ({
+      id: l.id,
+      date: l.d,
+      description: l.desc,
+      income: l.i,
+      expense: l.e,
+      category: l.cat,
+      balance: l.b,
+      createdAt: l.ca,
+    }));
+  }
+}
+
+export async function addLedgerRecord(
+  record: Omit<LedgerRecord, 'id' | 'balance' | 'createdAt'>
+): Promise<LedgerRecord> {
+  const newId = crypto.randomUUID();
+  const createdAt = new Date().toISOString();
+
+  // 現在のレコードを取得して残高を計算する
+  const currentRecords = await getLedgerRecords();
+  // 日付順（あるいはcreatedAt順）でソートして直前の残高を特定
+  const sortedRecords = [...currentRecords].sort(
+    (a, b) => a.date.localeCompare(b.date) || a.createdAt.localeCompare(b.createdAt)
+  );
+  const lastBalance = sortedRecords.length > 0 ? sortedRecords[sortedRecords.length - 1].balance : 0;
+  const balance = lastBalance + record.income - record.expense;
+
+  const newRecord: LedgerRecord = {
+    id: newId,
+    ...record,
+    balance,
+    createdAt,
+  };
+
+  if (getUseMock()) {
+    const list = readMockData<KVLedgerRecord>(mockLedgerPath);
+    list.push({
+      id: newRecord.id,
+      d: newRecord.date,
+      desc: newRecord.description,
+      i: newRecord.income,
+      e: newRecord.expense,
+      cat: newRecord.category,
+      b: newRecord.balance,
+      ca: newRecord.createdAt,
+    });
+    writeMockData(mockLedgerPath, list);
+  } else {
+    try {
+      const sheets = getSheetsClient();
+      const values = [[
+        newRecord.id,
+        newRecord.date,
+        newRecord.description,
+        newRecord.income,
+        newRecord.expense,
+        newRecord.category,
+        newRecord.balance,
+        newRecord.createdAt,
+      ]];
+
+      await sheets.spreadsheets.values.append({
+        spreadsheetId: SPREADSHEET_ID,
+        range: 'ledger!A:H',
+        valueInputOption: 'USER_ENTERED',
+        requestBody: { values },
+      });
+    } catch (error) {
+      console.error('Google Sheets API Error (addLedgerRecord), falling back to mock:', error);
+      const list = readMockData<KVLedgerRecord>(mockLedgerPath);
+      list.push({
+        id: newRecord.id,
+        d: newRecord.date,
+        desc: newRecord.description,
+        i: newRecord.income,
+        e: newRecord.expense,
+        cat: newRecord.category,
+        b: newRecord.balance,
+        ca: newRecord.createdAt,
+      });
+      writeMockData(mockLedgerPath, list);
+    }
+  }
+
+  return newRecord;
+}
+

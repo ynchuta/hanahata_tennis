@@ -36,3 +36,15 @@ export interface MonthlyReportRow {
   settlementStatus: SettlementStatus;
   reservations: Reservation[];
 }
+
+export interface LedgerRecord {
+  id: string;
+  date: string;        // YYYY-MM-DD
+  description: string; // 摘要
+  income: number;      // 収入
+  expense: number;     // 支出
+  category: string;    // 分類
+  balance: number;     // 残高
+  createdAt: string;   // 作成日時
+}
+

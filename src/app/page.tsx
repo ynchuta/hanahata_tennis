@@ -1,7 +1,8 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { Facility, Reservation, MonthlyReportRow, FeeType, SettlementStatus } from '@/types';
+import { Facility, Reservation, MonthlyReportRow, FeeType, SettlementStatus, LedgerRecord } from '@/types';
+
 
 interface Reserver {
   id: string;
@@ -17,12 +18,13 @@ export default function Home() {
   const [loginError, setLoginError] = useState('');
   const [loginLoading, setLoginLoading] = useState(false);
 
-  const [activeTab, setActiveTab] = useState<'calendar' | 'report' | 'settings'>('calendar');
+  const [activeTab, setActiveTab] = useState<'calendar' | 'report' | 'ledger' | 'settings'>('calendar');
 
   const [facilities, setFacilities] = useState<Facility[]>([]);
   const [reservers, setReservers] = useState<Reserver[]>([]);
   const [reservations, setReservations] = useState<Reservation[]>([]);
   const [report, setReport] = useState<MonthlyReportRow[]>([]);
+  const [ledgerRecords, setLedgerRecords] = useState<LedgerRecord[]>([]);
 
   // ローカルタイムゾーンでの日付文字列変換（JST/UTCズレ防止）
   const toLocalDateStr = (date: Date): string => {
@@ -51,6 +53,15 @@ export default function Home() {
     memo: '',
     settlementStatus: '未精算' as SettlementStatus,
     status: 'active' as 'active' | 'cancelled',
+  });
+
+  // 会計フォームステート
+  const [ledgerForm, setLedgerForm] = useState({
+    date: toLocalDateStr(new Date()),
+    description: '',
+    type: 'expense' as 'income' | 'expense',
+    amount: 0,
+    category: '備品購入',
   });
 
   const [facilityForm, setFacilityForm] = useState({
@@ -125,6 +136,16 @@ export default function Home() {
     } catch (err) { console.error(err); }
   }, [reportMonth]);
 
+  const fetchLedgerRecords = useCallback(async () => {
+    try {
+      const res = await fetch('/api/ledger');
+      if (res.ok) {
+        const data = await res.json();
+        setLedgerRecords(data);
+      }
+    } catch (err) { console.error(err); }
+  }, []);
+
   // セッション（LocalStorage）のチェック
   useEffect(() => {
     const auth = localStorage.getItem('nighter_auth');
@@ -144,9 +165,10 @@ export default function Home() {
         fetchFacilities();
         fetchReservers();
         fetchReservations();
+        fetchLedgerRecords();
       });
     }
-  }, [isLoggedIn, fetchFacilities, fetchReservers, fetchReservations]);
+  }, [isLoggedIn, fetchFacilities, fetchReservers, fetchReservations, fetchLedgerRecords]);
 
   // カレンダーの月（currentDate）と集計レポートの対象月（reportMonth）を連動させる
   useEffect(() => {
@@ -201,6 +223,51 @@ export default function Home() {
     }
   };
 
+  // 会計記帳登録
+  const handleSubmitLedger = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!ledgerForm.description.trim()) {
+      showToast('摘要を入力してください');
+      return;
+    }
+    if (ledgerForm.amount <= 0) {
+      showToast('金額は1円以上を入力してください');
+      return;
+    }
+    showToast('保存中...', 0, true);
+    try {
+      const payload = {
+        date: ledgerForm.date,
+        description: ledgerForm.description,
+        category: ledgerForm.category,
+        income: ledgerForm.type === 'income' ? ledgerForm.amount : 0,
+        expense: ledgerForm.type === 'expense' ? ledgerForm.amount : 0,
+      };
+
+      const res = await fetch('/api/ledger', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+
+      if (res.ok) {
+        await fetchLedgerRecords();
+        setLedgerForm((prev) => ({
+          ...prev,
+          description: '',
+          amount: 0,
+        }));
+        showToast('会計データを保存しました！');
+      } else {
+        const errData = await res.json();
+        showToast(`エラー: ${errData.error || '保存に失敗しました'}`);
+      }
+    } catch (err) {
+      console.error(err);
+      showToast('通信エラーが発生しました');
+    }
+  };
+
   const handleSubmitReservation = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.reserverName) {
@@ -242,12 +309,14 @@ export default function Home() {
             status: 'active',
           };
         });
+        await fetchLedgerRecords(); // 会計も再フェッチ
         showToast(isEditing ? '予約を更新しました！' : '予約を保存しました！');
       } else {
         const errData = await res.json();
         showToast(`エラー: ${errData.error || '保存に失敗しました'}`);
       }
     } catch (err) {
+
       console.error(err);
       showToast('通信エラーが発生しました');
     }
@@ -285,6 +354,7 @@ export default function Home() {
       if (res.ok) {
         const updated = await res.json();
         setReservations((prev) => prev.map((r) => r.id === id ? updated : r));
+        await fetchLedgerRecords(); // 会計データを再取得
         showToast('精算ステータスを更新しました！');
       } else {
         setReservations((prev) => prev.map((r) => r.id === id ? { ...r, settlementStatus: currentStatus } : r));
@@ -345,6 +415,7 @@ export default function Home() {
       });
       if (res.ok) {
         await fetchReservations();
+        await fetchLedgerRecords(); // 会計データを再取得
         showToast('一括精算ステータスを更新しました！');
       } else {
         await fetchReservations();
@@ -703,6 +774,9 @@ export default function Home() {
         </button>
         <button className={`tab-btn ${activeTab === 'report' ? 'active' : ''}`} onClick={() => setActiveTab('report')}>
           集計レポート
+        </button>
+        <button className={`tab-btn ${activeTab === 'ledger' ? 'active' : ''}`} onClick={() => setActiveTab('ledger')}>
+          会計管理
         </button>
         <button className={`tab-btn ${activeTab === 'settings' ? 'active' : ''}`} onClick={() => setActiveTab('settings')}>
           設定
@@ -1172,6 +1246,184 @@ export default function Home() {
                     </div>
                   );
                 })}
+              </div>
+            )}
+          </div>
+        </section>
+      )}
+
+      {/* ─── 会計管理（お小遣い帳）タブ ─── */}
+      {activeTab === 'ledger' && (
+        <section>
+          {/* 現在の残高（財布の中身）表示 */}
+          <div className="card" style={{
+            background: 'linear-gradient(135deg, rgba(20, 26, 46, 0.85) 0%, rgba(139, 92, 246, 0.15) 100%)',
+            border: '1px solid rgba(139, 92, 246, 0.25)',
+            textAlign: 'center',
+            padding: '1.75rem'
+          }}>
+            <h3 style={{ fontSize: '0.9rem', color: 'var(--color-text-muted)', marginBottom: '0.5rem', fontWeight: 500 }}>
+              現在の財布の残高
+            </h3>
+            <div style={{
+              fontSize: '2.5rem',
+              fontWeight: 700,
+              color: '#fff',
+              textShadow: '0 0 15px rgba(255,255,255,0.1)',
+              background: 'linear-gradient(135deg, #fff, var(--color-secondary))',
+              WebkitBackgroundClip: 'text',
+              WebkitTextFillColor: 'transparent'
+            }}>
+              {(ledgerRecords.length > 0 ? ledgerRecords[ledgerRecords.length - 1].balance : 0).toLocaleString()}円
+            </div>
+          </div>
+
+          {/* 入力フォーム */}
+          <div className="card">
+            <h3 style={{ marginBottom: '1.25rem', color: 'var(--color-secondary)', fontSize: '1.1rem' }}>収支を登録</h3>
+            <form onSubmit={handleSubmitLedger}>
+              <div className="form-row">
+                <div className="form-group">
+                  <label className="form-label">日付</label>
+                  <input
+                    type="date"
+                    className="form-input"
+                    required
+                    value={ledgerForm.date}
+                    onChange={(e) => setLedgerForm((prev) => ({ ...prev, date: e.target.value }))}
+                  />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">区分</label>
+                  <select
+                    className="form-select"
+                    value={ledgerForm.type}
+                    onChange={(e) => setLedgerForm((prev) => ({ ...prev, type: e.target.value as 'income' | 'expense' }))}
+                  >
+                    <option value="expense">支出 (支払い)</option>
+                    <option value="income">収入 (受け取り)</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="form-row">
+                <div className="form-group">
+                  <label className="form-label">分類</label>
+                  <select
+                    className="form-select"
+                    value={ledgerForm.category}
+                    onChange={(e) => setLedgerForm((prev) => ({ ...prev, category: e.target.value }))}
+                  >
+                    <option value="部費">部費</option>
+                    <option value="コート代返金">コート代返金</option>
+                    <option value="備品購入">備品購入</option>
+                    <option value="大会参加費">大会参加費</option>
+                    <option value="前年度繰越">前年度繰越</option>
+                    <option value="その他">その他</option>
+                  </select>
+                </div>
+                <div className="form-group">
+                  <label className="form-label">金額 (円)</label>
+                  <input
+                    type="number"
+                    className="form-input"
+                    required
+                    min="1"
+                    placeholder="金額を入力"
+                    value={ledgerForm.amount || ''}
+                    onChange={(e) => setLedgerForm((prev) => ({ ...prev, amount: Number(e.target.value) }))}
+                  />
+                </div>
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">摘要 (メモ)</label>
+                <input
+                  type="text"
+                  className="form-input"
+                  required
+                  placeholder="例: ボール購入、7月分部費回収など"
+                  value={ledgerForm.description}
+                  onChange={(e) => setLedgerForm((prev) => ({ ...prev, description: e.target.value }))}
+                />
+              </div>
+
+              <button type="submit" className="btn btn-primary" style={{ marginTop: '0.75rem' }}>
+                登録する
+              </button>
+            </form>
+          </div>
+
+          {/* 会計履歴一覧 */}
+          <div className="card" style={{ padding: '1rem 0.5rem' }}>
+            <h3 style={{ padding: '0 0.75rem', marginBottom: '1rem', fontSize: '1.1rem' }}>会計履歴一覧</h3>
+            {ledgerRecords.length === 0 ? (
+              <p style={{ color: 'var(--color-text-muted)', textAlign: 'center', padding: '2rem 0' }}>
+                会計データはありません
+              </p>
+            ) : (
+              <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.875rem' }}>
+                  <thead>
+                    <tr style={{ borderBottom: '1px solid var(--border-color)', color: 'var(--color-text-muted)' }}>
+                      <th style={{ textAlign: 'left', padding: '8px 4px', fontWeight: 600 }}>日付</th>
+                      <th style={{ textAlign: 'left', padding: '8px 4px', fontWeight: 600 }}>摘要 / 分類</th>
+                      <th style={{ textAlign: 'right', padding: '8px 4px', fontWeight: 600 }}>収支</th>
+                      <th style={{ textAlign: 'right', padding: '8px 4px', fontWeight: 600 }}>残高</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {[...ledgerRecords]
+                      .sort((a, b) => b.date.localeCompare(a.date) || b.createdAt.localeCompare(a.createdAt))
+                      .map((record) => {
+                        const isIncome = record.income > 0;
+                        return (
+                          <tr key={record.id} style={{ borderBottom: '1px solid rgba(255,255,255,0.03)' }}>
+                            {/* 日付 */}
+                            <td style={{ padding: '10px 4px', verticalAlign: 'middle', whiteSpace: 'nowrap' }}>
+                              {record.date.replace(/^\d{4}-/, '')}
+                            </td>
+                            {/* 摘要・分類 */}
+                            <td style={{ padding: '10px 4px', verticalAlign: 'middle' }}>
+                              <div style={{ fontWeight: 500, wordBreak: 'break-all' }}>{record.description}</div>
+                              <span style={{
+                                fontSize: '0.72rem',
+                                color: 'var(--color-text-muted)',
+                                background: 'rgba(255,255,255,0.04)',
+                                padding: '2px 6px',
+                                borderRadius: '4px',
+                                display: 'inline-block',
+                                marginTop: '2px'
+                              }}>
+                                {record.category}
+                              </span>
+                            </td>
+                            {/* 金額 */}
+                            <td style={{
+                              padding: '10px 4px',
+                              textAlign: 'right',
+                              verticalAlign: 'middle',
+                              fontWeight: 600,
+                              color: isIncome ? 'var(--color-success)' : 'var(--color-accent)',
+                              whiteSpace: 'nowrap'
+                            }}>
+                              {isIncome ? `+${record.income.toLocaleString()}` : `-${record.expense.toLocaleString()}`}
+                            </td>
+                            {/* 残高 */}
+                            <td style={{
+                              padding: '10px 4px',
+                              textAlign: 'right',
+                              verticalAlign: 'middle',
+                              color: 'var(--color-text-muted)',
+                              whiteSpace: 'nowrap'
+                            }}>
+                              {record.balance.toLocaleString()}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                  </tbody>
+                </table>
               </div>
             )}
           </div>
