@@ -977,17 +977,14 @@ export default function Home() {
                         {day.getDate()}
                       </span>
                       {dayReservations.length > 0 && (
-                        <div className="badge-container">
+                        <div className="day-reserver-list">
                           {dayReservations.map((r) => {
                             const isCancelled = r.status === 'cancelled';
                             return (
                               <div
                                 key={r.id}
-                                className={`badge ${r.settlementStatus === '精算済' ? 'settled' : 'unsettled'} ${isCancelled ? 'cancelled-badge' : ''}`}
+                                className={`day-reserver-name ${r.settlementStatus === '精算済' ? 'settled' : 'unsettled'}`}
                                 style={{
-                                  whiteSpace: 'nowrap',
-                                  overflow: 'hidden',
-                                  textOverflow: 'ellipsis',
                                   textDecoration: isCancelled ? 'line-through' : 'none',
                                   opacity: isCancelled ? 0.45 : 1,
                                 }}
@@ -1255,6 +1252,23 @@ export default function Home() {
                           </div>
                         </div>
                       </div>
+
+                      {/* コート利用詳細 */}
+                      <div style={{ marginTop: '0.6rem', paddingTop: '0.6rem', borderTop: '1px solid rgba(255,255,255,0.06)', fontSize: '0.82rem', color: 'var(--color-text-muted)', display: 'flex', flexWrap: 'wrap', gap: '0.5rem 1rem' }}>
+                        <span>⏰ {r.courtStartTime}〜{r.courtEndTime}</span>
+                        {r.lightHours > 0 && (
+                          <span>💡 照明 {r.lightHours}時間{r.lightStartTime ? `（${r.lightStartTime}〜）` : ''}</span>
+                        )}
+                        <span style={{ color: 'var(--color-text-main)', fontWeight: 600 }}>
+                          💴 コート {r.courtFee.toLocaleString()}円
+                          {r.lightHours > 0 && ` + 照明 ${r.lightFee.toLocaleString()}円`}
+                          {' = '}
+                          <span style={{ color: 'var(--color-secondary)' }}>{r.totalFee.toLocaleString()}円</span>
+                        </span>
+                      </div>
+                      {r.memo && (
+                        <div className="reservation-memo">📝 {r.memo}</div>
+                      )}
                     </div>
                   );
                 })}

@@ -116,7 +116,7 @@ describe('テニス部ナイター費精算管理システム テストスイー
         lightHours: 0,
         feeType: '大人',
         memo: '',
-        status: '未精算',
+        status: 'active',
       });
 
       await addReservation({
@@ -128,7 +128,7 @@ describe('テニス部ナイター費精算管理システム テストスイー
         lightHours: 1,
         feeType: '大人',
         memo: 'コートA使用',
-        status: '未精算',
+        status: 'active',
       });
 
       const records = await getReservations();
