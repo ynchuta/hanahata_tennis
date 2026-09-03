@@ -1323,46 +1323,53 @@ export default function Home() {
 
             {/* 月別集計・月ナビゲーション */}
             <div className="card" style={{ padding: '1.25rem' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem', flexWrap: 'wrap', gap: '0.75rem' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                  <button className="calendar-nav-btn" onClick={() => changeLedgerMonth(-1)} title="前月">&lt; 前月</button>
-                  <h3 style={{ fontSize: '1.2rem', margin: '0 0.5rem', fontWeight: 700, minWidth: '120px', textAlign: 'center' }}>
-                    {lYear}年 {parseInt(lMonth, 10)}月
-                  </h3>
-                  <button className="calendar-nav-btn" onClick={() => changeLedgerMonth(1)} title="翌月">翌月 &gt;</button>
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                  <input
-                    type="month"
-                    className="form-input"
-                    style={{ width: 'auto', padding: '5px 10px', fontSize: '0.85rem' }}
-                    value={ledgerMonth}
-                    onChange={(e) => {
-                      if (e.target.value) {
-                        setLedgerMonth(e.target.value);
-                        setShowAllLedgerMonths(false);
-                      }
-                    }}
-                  />
-                  <button
-                    className="btn btn-secondary"
-                    style={{
-                      width: 'auto',
-                      padding: '5px 12px',
-                      fontSize: '0.8rem',
-                      borderColor: showAllLedgerMonths ? 'var(--color-primary)' : 'rgba(255,255,255,0.15)',
-                      color: showAllLedgerMonths ? 'var(--color-primary)' : 'var(--color-text-muted)',
-                      background: showAllLedgerMonths ? 'rgba(139, 92, 246, 0.1)' : 'transparent',
-                    }}
-                    onClick={() => setShowAllLedgerMonths((prev) => !prev)}
-                  >
-                    {showAllLedgerMonths ? '月別表示に戻す' : '全期間表示'}
-                  </button>
-                </div>
+              {/* カレンダー画面に統一した月ナビゲーション（前月:左, 年月:中央, 翌月:右） */}
+              <div className="calendar-header" style={{ marginBottom: '1rem' }}>
+                <button className="calendar-nav-btn" onClick={() => changeLedgerMonth(-1)} title="前月">&lt; 前月</button>
+                <h2 className="calendar-month-title" style={{ fontSize: '1.25rem', margin: 0, textAlign: 'center' }}>
+                  {showAllLedgerMonths ? '全期間' : `${lYear}年 ${parseInt(lMonth, 10)}月`}
+                </h2>
+                <button className="calendar-nav-btn" onClick={() => changeLedgerMonth(1)} title="翌月">翌月 &gt;</button>
               </div>
 
-              {/* 月別サマリーカード */}
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: '0.75rem' }}>
+              {/* 年月セレクタと全期間トグル（中央揃え） */}
+              <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '0.75rem', marginBottom: '1.25rem', flexWrap: 'wrap' }}>
+                <input
+                  type="month"
+                  className="form-input"
+                  style={{ width: 'auto', padding: '6px 12px', fontSize: '0.85rem' }}
+                  value={ledgerMonth}
+                  onChange={(e) => {
+                    if (e.target.value) {
+                      setLedgerMonth(e.target.value);
+                      setShowAllLedgerMonths(false);
+                    }
+                  }}
+                />
+                <button
+                  className="btn btn-secondary"
+                  style={{
+                    width: 'auto',
+                    padding: '6px 14px',
+                    fontSize: '0.8rem',
+                    borderColor: showAllLedgerMonths ? 'var(--color-primary)' : 'rgba(255,255,255,0.15)',
+                    color: showAllLedgerMonths ? 'var(--color-primary)' : 'var(--color-text-muted)',
+                    background: showAllLedgerMonths ? 'rgba(139, 92, 246, 0.1)' : 'transparent',
+                  }}
+                  onClick={() => setShowAllLedgerMonths((prev) => !prev)}
+                >
+                  {showAllLedgerMonths ? '月別表示に戻す' : '全期間表示'}
+                </button>
+              </div>
+
+              {/* 月別サマリーカード（中央揃え） */}
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))',
+                gap: '0.75rem',
+                maxWidth: '600px',
+                margin: '0 auto',
+              }}>
                 <div style={{ background: 'rgba(16, 185, 129, 0.08)', border: '1px solid rgba(16, 185, 129, 0.25)', borderRadius: '10px', padding: '0.85rem', textAlign: 'center' }}>
                   <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', marginBottom: '0.25rem' }}>
                     {showAllLedgerMonths ? '全期間 収入' : `${parseInt(lMonth, 10)}月 収入`}
@@ -1401,8 +1408,9 @@ export default function Home() {
               {editingLedgerId && (
                 <div style={{
                   display: 'flex',
-                  justifyContent: 'space-between',
+                  justifyContent: 'center',
                   alignItems: 'center',
+                  gap: '1rem',
                   padding: '0.6rem 0.85rem',
                   marginBottom: '1rem',
                   borderRadius: '8px',
@@ -1410,6 +1418,7 @@ export default function Home() {
                   border: '1px solid rgba(6, 182, 212, 0.35)',
                   color: 'var(--color-secondary)',
                   fontSize: '0.85rem',
+                  flexWrap: 'wrap',
                 }}>
                   <span style={{ fontWeight: 600 }}>✏️ 会計データを編集中です</span>
                   <button
@@ -1422,7 +1431,7 @@ export default function Home() {
                   </button>
                 </div>
               )}
-              <h3 style={{ marginBottom: '1.25rem', color: 'var(--color-secondary)', fontSize: '1.1rem' }}>
+              <h3 style={{ marginBottom: '1.25rem', color: 'var(--color-secondary)', fontSize: '1.1rem', textAlign: 'center' }}>
                 {editingLedgerId ? '収支データを編集' : '収支を登録'}
               </h3>
               <form onSubmit={handleSubmitLedger}>
@@ -1506,13 +1515,13 @@ export default function Home() {
 
             {/* 会計履歴一覧 */}
             <div className="card" style={{ padding: '1rem 0.5rem' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0 0.75rem', marginBottom: '1rem' }}>
-                <h3 style={{ fontSize: '1.1rem', margin: 0 }}>
-                  {showAllLedgerMonths ? '会計履歴一覧 (全期間)' : `${parseInt(lMonth, 10)}月の会計履歴一覧`}
+              <div style={{ textAlign: 'center', marginBottom: '1rem', padding: '0 0.75rem' }}>
+                <h3 style={{ fontSize: '1.1rem', margin: 0, display: 'inline-flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <span>{showAllLedgerMonths ? '会計履歴一覧 (全期間)' : `${parseInt(lMonth, 10)}月の会計履歴一覧`}</span>
+                  <span style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)', fontWeight: 'normal', background: 'rgba(255,255,255,0.05)', padding: '2px 8px', borderRadius: '12px' }}>
+                    {displayedLedgerRecords.length} 件
+                  </span>
                 </h3>
-                <span style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)' }}>
-                  {displayedLedgerRecords.length} 件
-                </span>
               </div>
               {displayedLedgerRecords.length === 0 ? (
                 <p style={{ color: 'var(--color-text-muted)', textAlign: 'center', padding: '2rem 0' }}>
