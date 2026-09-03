@@ -48,3 +48,9 @@ export interface LedgerRecord {
   createdAt: string;   // 作成日時
 }
 
+export interface LedgerCategory {
+  id: string;
+  name: string;
+  createdAt: string;
+}
+

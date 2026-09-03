@@ -1,5 +1,5 @@
 import { google } from 'googleapis';
-import { Facility, Reservation, SettlementStatus, LedgerRecord } from '../types';
+import { Facility, Reservation, SettlementStatus, LedgerRecord, LedgerCategory } from '../types';
 import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
@@ -28,11 +28,18 @@ const mockFacilitiesPath = path.join(process.cwd(), 'mock-data', 'facilities.jso
 const mockRecordsPath = path.join(process.cwd(), 'mock-data', 'records.json');
 const mockReserversPath = path.join(process.cwd(), 'mock-data', 'reservers.json');
 const mockLedgerPath = path.join(process.cwd(), 'mock-data', 'ledger.json');
+const mockCategoriesPath = path.join(process.cwd(), 'mock-data', 'categories.json');
 
 export interface Reserver {
   id: string;
   name: string;
   createdAt: string;
+}
+
+interface KVCategory {
+  id: string;
+  n: string;   // name
+  ca: string;  // createdAt
 }
 
 // 短縮キー形式のインターフェース定義（モック用）
@@ -1215,10 +1222,66 @@ interface KVLedgerRecord {
   ca: string;  // createdAt
 }
 
+/**
+ * 全レコードを日付昇順（同日の場合はcreatedAt昇順）に並べ替え、累積残高を再計算する
+ */
+export function recalculateLedgerBalances(records: LedgerRecord[]): LedgerRecord[] {
+  const sorted = [...records].sort(
+    (a, b) => a.date.localeCompare(b.date) || a.createdAt.localeCompare(b.createdAt)
+  );
+  let currentBalance = 0;
+  for (const item of sorted) {
+    currentBalance += item.income - item.expense;
+    item.balance = currentBalance;
+  }
+  return sorted;
+}
+
+function syncLedgerToMock(records: LedgerRecord[]): void {
+  const list: KVLedgerRecord[] = records.map((r) => ({
+    id: r.id,
+    d: r.date,
+    desc: r.description,
+    i: r.income,
+    e: r.expense,
+    cat: r.category,
+    b: r.balance,
+    ca: r.createdAt,
+  }));
+  writeMockData(mockLedgerPath, list);
+}
+
+async function syncLedgerToSheet(sheets: any, records: LedgerRecord[]): Promise<void> {
+  const values = records.map((r) => [
+    r.id,
+    r.date,
+    r.description,
+    r.income,
+    r.expense,
+    r.category,
+    r.balance,
+    r.createdAt,
+  ]);
+
+  await sheets.spreadsheets.values.clear({
+    spreadsheetId: SPREADSHEET_ID,
+    range: 'ledger!A2:H',
+  });
+
+  if (values.length > 0) {
+    await sheets.spreadsheets.values.update({
+      spreadsheetId: SPREADSHEET_ID,
+      range: `ledger!A2:H${values.length + 1}`,
+      valueInputOption: 'USER_ENTERED',
+      requestBody: { values },
+    });
+  }
+}
+
 export async function getLedgerRecords(): Promise<LedgerRecord[]> {
   if (getUseMock()) {
     const list = readMockData<KVLedgerRecord>(mockLedgerPath);
-    return list.map((l) => ({
+    const rawRecords: LedgerRecord[] = list.map((l) => ({
       id: l.id,
       date: l.d,
       description: l.desc,
@@ -1228,6 +1291,7 @@ export async function getLedgerRecords(): Promise<LedgerRecord[]> {
       balance: l.b,
       createdAt: l.ca,
     }));
+    return recalculateLedgerBalances(rawRecords);
   }
 
   try {
@@ -1240,7 +1304,7 @@ export async function getLedgerRecords(): Promise<LedgerRecord[]> {
     const rows = response.data.values;
     if (!rows || rows.length === 0) return [];
 
-    return rows.map((row: any) => ({
+    const rawRecords: LedgerRecord[] = rows.map((row: any) => ({
       id: row[0],
       date: row[1],
       description: row[2],
@@ -1248,12 +1312,14 @@ export async function getLedgerRecords(): Promise<LedgerRecord[]> {
       expense: Number(row[4]) || 0,
       category: row[5] || 'その他',
       balance: Number(row[6]) || 0,
-      createdAt: row[7],
+      createdAt: row[7] || new Date().toISOString(),
     }));
+
+    return recalculateLedgerBalances(rawRecords);
   } catch (error) {
     console.error('Google Sheets API Error (getLedgerRecords), falling back to mock:', error);
     const list = readMockData<KVLedgerRecord>(mockLedgerPath);
-    return list.map((l) => ({
+    const rawRecords: LedgerRecord[] = list.map((l) => ({
       id: l.id,
       date: l.d,
       description: l.desc,
@@ -1263,6 +1329,7 @@ export async function getLedgerRecords(): Promise<LedgerRecord[]> {
       balance: l.b,
       createdAt: l.ca,
     }));
+    return recalculateLedgerBalances(rawRecords);
   }
 }
 
@@ -1272,72 +1339,304 @@ export async function addLedgerRecord(
   const newId = crypto.randomUUID();
   const createdAt = new Date().toISOString();
 
-  // 現在のレコードを取得して残高を計算する
   const currentRecords = await getLedgerRecords();
-  // 日付順（あるいはcreatedAt順）でソートして直前の残高を特定
-  const sortedRecords = [...currentRecords].sort(
-    (a, b) => a.date.localeCompare(b.date) || a.createdAt.localeCompare(b.createdAt)
-  );
-  const lastBalance = sortedRecords.length > 0 ? sortedRecords[sortedRecords.length - 1].balance : 0;
-  const balance = lastBalance + record.income - record.expense;
-
-  const newRecord: LedgerRecord = {
+  const newRecordCandidate: LedgerRecord = {
     id: newId,
     ...record,
-    balance,
+    balance: 0,
     createdAt,
   };
 
+  const updatedRecords = recalculateLedgerBalances([...currentRecords, newRecordCandidate]);
+  const finalNewRecord = updatedRecords.find((r) => r.id === newId)!;
+
   if (getUseMock()) {
-    const list = readMockData<KVLedgerRecord>(mockLedgerPath);
-    list.push({
-      id: newRecord.id,
-      d: newRecord.date,
-      desc: newRecord.description,
-      i: newRecord.income,
-      e: newRecord.expense,
-      cat: newRecord.category,
-      b: newRecord.balance,
-      ca: newRecord.createdAt,
-    });
-    writeMockData(mockLedgerPath, list);
+    syncLedgerToMock(updatedRecords);
   } else {
     try {
       const sheets = getSheetsClient();
-      const values = [[
-        newRecord.id,
-        newRecord.date,
-        newRecord.description,
-        newRecord.income,
-        newRecord.expense,
-        newRecord.category,
-        newRecord.balance,
-        newRecord.createdAt,
-      ]];
-
-      await sheets.spreadsheets.values.append({
-        spreadsheetId: SPREADSHEET_ID,
-        range: 'ledger!A:H',
-        valueInputOption: 'USER_ENTERED',
-        requestBody: { values },
-      });
+      await syncLedgerToSheet(sheets, updatedRecords);
     } catch (error) {
       console.error('Google Sheets API Error (addLedgerRecord), falling back to mock:', error);
-      const list = readMockData<KVLedgerRecord>(mockLedgerPath);
-      list.push({
-        id: newRecord.id,
-        d: newRecord.date,
-        desc: newRecord.description,
-        i: newRecord.income,
-        e: newRecord.expense,
-        cat: newRecord.category,
-        b: newRecord.balance,
-        ca: newRecord.createdAt,
-      });
-      writeMockData(mockLedgerPath, list);
+      syncLedgerToMock(updatedRecords);
     }
   }
 
-  return newRecord;
+  return finalNewRecord;
+}
+
+// 会計データの更新
+export async function updateLedgerRecord(
+  id: string,
+  data: {
+    date: string;
+    description: string;
+    income: number;
+    expense: number;
+    category: string;
+  }
+): Promise<LedgerRecord | null> {
+  const currentRecords = await getLedgerRecords();
+  const targetIndex = currentRecords.findIndex((r) => r.id === id);
+  if (targetIndex === -1) return null;
+
+  const updatedList = currentRecords.map((rec) => {
+    if (rec.id === id) {
+      return {
+        ...rec,
+        date: data.date,
+        description: data.description,
+        income: data.income,
+        expense: data.expense,
+        category: data.category,
+      };
+    }
+    return rec;
+  });
+
+  const recalculated = recalculateLedgerBalances(updatedList);
+  const updatedRecord = recalculated.find((r) => r.id === id) || null;
+
+  if (getUseMock()) {
+    syncLedgerToMock(recalculated);
+  } else {
+    try {
+      const sheets = getSheetsClient();
+      await syncLedgerToSheet(sheets, recalculated);
+    } catch (error) {
+      console.error('Google Sheets API Error (updateLedgerRecord), falling back to mock:', error);
+      syncLedgerToMock(recalculated);
+    }
+  }
+
+  return updatedRecord;
+}
+
+// 会計データの削除
+export async function deleteLedgerRecord(id: string): Promise<boolean> {
+  const currentRecords = await getLedgerRecords();
+  const filtered = currentRecords.filter((r) => r.id !== id);
+  if (currentRecords.length === filtered.length) return false;
+
+  const recalculated = recalculateLedgerBalances(filtered);
+
+  if (getUseMock()) {
+    syncLedgerToMock(recalculated);
+  } else {
+    try {
+      const sheets = getSheetsClient();
+      await syncLedgerToSheet(sheets, recalculated);
+    } catch (error) {
+      console.error('Google Sheets API Error (deleteLedgerRecord), falling back to mock:', error);
+      syncLedgerToMock(recalculated);
+    }
+  }
+
+  return true;
+}
+
+/* =========================================================================
+   会計分類マスタ (Categories)
+   ========================================================================= */
+
+const DEFAULT_CATEGORIES = ['雑費', 'その他'];
+
+async function ensureCategoriesSheet(sheets: any): Promise<void> {
+  try {
+    const sheetId = await getSheetIdByName(sheets, 'categories');
+    if (sheetId === null) {
+      await sheets.spreadsheets.batchUpdate({
+        spreadsheetId: SPREADSHEET_ID,
+        requestBody: {
+          requests: [
+            {
+              addSheet: {
+                properties: {
+                  title: 'categories',
+                },
+              },
+            },
+          ],
+        },
+      });
+      const initialValues = [
+        ['id', 'name', 'createdAt'],
+        ...DEFAULT_CATEGORIES.map((cat) => [crypto.randomUUID(), cat, new Date().toISOString()]),
+      ];
+      await sheets.spreadsheets.values.update({
+        spreadsheetId: SPREADSHEET_ID,
+        range: 'categories!A1:C',
+        valueInputOption: 'USER_ENTERED',
+        requestBody: { values: initialValues },
+      });
+    }
+  } catch (error) {
+    console.error('Error ensuring categories sheet:', error);
+  }
+}
+
+export async function getCategories(): Promise<LedgerCategory[]> {
+  if (getUseMock()) {
+    let list = readMockData<KVCategory>(mockCategoriesPath);
+    if (!list || list.length === 0) {
+      list = DEFAULT_CATEGORIES.map((cat, idx) => ({
+        id: String(idx + 1),
+        n: cat,
+        ca: new Date().toISOString(),
+      }));
+      writeMockData(mockCategoriesPath, list);
+    }
+    return list.map((c) => ({
+      id: c.id,
+      name: c.n,
+      createdAt: c.ca,
+    }));
+  }
+
+  try {
+    const sheets = getSheetsClient();
+    await ensureCategoriesSheet(sheets);
+
+    const response = await sheets.spreadsheets.values.get({
+      spreadsheetId: SPREADSHEET_ID,
+      range: 'categories!A2:C',
+    });
+
+    const rows = response.data.values;
+    if (!rows || rows.length === 0) {
+      const initialValues = DEFAULT_CATEGORIES.map((cat) => [crypto.randomUUID(), cat, new Date().toISOString()]);
+      await sheets.spreadsheets.values.append({
+        spreadsheetId: SPREADSHEET_ID,
+        range: 'categories!A:C',
+        valueInputOption: 'USER_ENTERED',
+        requestBody: { values: initialValues },
+      });
+      return initialValues.map((row) => ({
+        id: row[0],
+        name: row[1],
+        createdAt: row[2],
+      }));
+    }
+
+    return rows.map((row: any) => ({
+      id: row[0],
+      name: row[1],
+      createdAt: row[2],
+    }));
+  } catch (error) {
+    console.error('Google Sheets API Error (getCategories), falling back to mock:', error);
+    let list = readMockData<KVCategory>(mockCategoriesPath);
+    if (!list || list.length === 0) {
+      list = DEFAULT_CATEGORIES.map((cat, idx) => ({
+        id: String(idx + 1),
+        n: cat,
+        ca: new Date().toISOString(),
+      }));
+      writeMockData(mockCategoriesPath, list);
+    }
+    return list.map((c) => ({
+      id: c.id,
+      name: c.n,
+      createdAt: c.ca,
+    }));
+  }
+}
+
+export async function addCategory(name: string): Promise<LedgerCategory> {
+  const newCat: LedgerCategory = {
+    id: crypto.randomUUID(),
+    name: name.trim(),
+    createdAt: new Date().toISOString(),
+  };
+
+  if (getUseMock()) {
+    const list = readMockData<KVCategory>(mockCategoriesPath);
+    list.push({
+      id: newCat.id,
+      n: newCat.name,
+      ca: newCat.createdAt,
+    });
+    writeMockData(mockCategoriesPath, list);
+    return newCat;
+  }
+
+  try {
+    const sheets = getSheetsClient();
+    await ensureCategoriesSheet(sheets);
+
+    const values = [[newCat.id, newCat.name, newCat.createdAt]];
+    await sheets.spreadsheets.values.append({
+      spreadsheetId: SPREADSHEET_ID,
+      range: 'categories!A:C',
+      valueInputOption: 'USER_ENTERED',
+      requestBody: { values },
+    });
+    return newCat;
+  } catch (error) {
+    console.error('Google Sheets API Error (addCategory), falling back to mock:', error);
+    const list = readMockData<KVCategory>(mockCategoriesPath);
+    list.push({
+      id: newCat.id,
+      n: newCat.name,
+      ca: newCat.createdAt,
+    });
+    writeMockData(mockCategoriesPath, list);
+    return newCat;
+  }
+}
+
+export async function deleteCategory(idOrName: string): Promise<boolean> {
+  if (getUseMock()) {
+    const list = readMockData<KVCategory>(mockCategoriesPath);
+    const filtered = list.filter((c) => c.id !== idOrName && c.n !== idOrName);
+    if (list.length === filtered.length) return false;
+    writeMockData(mockCategoriesPath, filtered);
+    return true;
+  }
+
+  try {
+    const sheets = getSheetsClient();
+    await ensureCategoriesSheet(sheets);
+
+    const response = await sheets.spreadsheets.values.get({
+      spreadsheetId: SPREADSHEET_ID,
+      range: 'categories!A:B',
+    });
+
+    const rows = response.data.values;
+    if (!rows || rows.length === 0) return false;
+
+    const rowIndex = rows.findIndex((row: any) => row[0] === idOrName || row[1] === idOrName) + 1;
+    if (rowIndex <= 1) return false;
+
+    const sheetId = await getSheetIdByName(sheets, 'categories');
+    if (sheetId === null) return false;
+
+    await sheets.spreadsheets.batchUpdate({
+      spreadsheetId: SPREADSHEET_ID,
+      requestBody: {
+        requests: [
+          {
+            deleteDimension: {
+              range: {
+                sheetId,
+                dimension: 'ROWS',
+                startIndex: rowIndex - 1,
+                endIndex: rowIndex,
+              },
+            },
+          },
+        ],
+      },
+    });
+    return true;
+  } catch (error) {
+    console.error('Google Sheets API Error (deleteCategory), falling back to mock:', error);
+    const list = readMockData<KVCategory>(mockCategoriesPath);
+    const filtered = list.filter((c) => c.id !== idOrName && c.n !== idOrName);
+    if (list.length === filtered.length) return false;
+    writeMockData(mockCategoriesPath, filtered);
+    return true;
+  }
 }
 

@@ -25,6 +25,8 @@ const hakatamori: Facility = {
 
 const mockRecordsPath = path.join(process.cwd(), 'mock-data', 'records.json');
 const mockReserversPath = path.join(process.cwd(), 'mock-data', 'reservers.json');
+const mockLedgerPath = path.join(process.cwd(), 'mock-data', 'ledger.json');
+const mockCategoriesPath = path.join(process.cwd(), 'mock-data', 'categories.json');
 
 describe('テニス部ナイター費精算管理システム テストスイート', () => {
 
@@ -189,6 +191,129 @@ describe('テニス部ナイター費精算管理システム テストスイー
 
       const list = await getReservers();
       assert.strictEqual(list.some(r => r.id === newReserver.id), false);
+    });
+  });
+
+  describe('会計管理機能の検証', () => {
+    fs.writeFileSync(mockLedgerPath, '[]', 'utf-8');
+
+    test('テストケース[時系列入力]: 過去・現在・未来の日付を順不同で入力した場合でも、時系列順で残高が再計算されるか検証', async () => {
+      const { addLedgerRecord, getLedgerRecords } = await import('../src/lib/db');
+
+      // 1. 2026-06-15 に 10,000円 の収入
+      await addLedgerRecord({
+        date: '2026-06-15',
+        description: '部費集金',
+        income: 10000,
+        expense: 0,
+        category: '部費',
+      });
+
+      // 2. 過去日付 2026-06-05 に 3,000円 の支出（時系列順序が逆）
+      await addLedgerRecord({
+        date: '2026-06-05',
+        description: 'ボール購入（過去）',
+        income: 0,
+        expense: 3000,
+        category: '雑費',
+      });
+
+      // 3. 未来日付 2026-06-25 に 2,000円 の支出
+      await addLedgerRecord({
+        date: '2026-06-25',
+        description: 'ラインテープ購入',
+        income: 0,
+        expense: 2000,
+        category: '雑費',
+      });
+
+      const records = await getLedgerRecords();
+      assert.strictEqual(records.length, 3);
+
+      // 時系列順（日付昇順）で検証
+      // 1件目: 2026-06-05 支出3000 => 残高 -3000
+      assert.strictEqual(records[0].date, '2026-06-05');
+      assert.strictEqual(records[0].balance, -3000);
+
+      // 2件目: 2026-06-15 収入10000 => 残高 -3000 + 10000 = 7000
+      assert.strictEqual(records[1].date, '2026-06-15');
+      assert.strictEqual(records[1].balance, 7000);
+
+      // 3件目: 2026-06-25 支出2000 => 残高 7000 - 2000 = 5000
+      assert.strictEqual(records[2].date, '2026-06-25');
+      assert.strictEqual(records[2].balance, 5000);
+    });
+
+    test('テストケース[会計編集]: 過去のレコードを編集した際、後続レコードの残高が連動して正しく再計算されるか検証', async () => {
+      const { getLedgerRecords, updateLedgerRecord } = await import('../src/lib/db');
+      const records = await getLedgerRecords();
+
+      // 先頭（2026-06-05）の支出を 3,000円 から 1,000円 に変更
+      const firstRecord = records[0];
+      const updated = await updateLedgerRecord(firstRecord.id, {
+        date: firstRecord.date,
+        description: firstRecord.description,
+        income: 0,
+        expense: 1000,
+        category: firstRecord.category,
+      });
+
+      assert.ok(updated);
+      assert.strictEqual(updated.balance, -1000);
+
+      const afterUpdate = await getLedgerRecords();
+      // 1件目: 支出1000 => 残高 -1000
+      assert.strictEqual(afterUpdate[0].balance, -1000);
+      // 2件目: 収入10000 => 残高 9000
+      assert.strictEqual(afterUpdate[1].balance, 9000);
+      // 3件目: 支出2000 => 残高 7000
+      assert.strictEqual(afterUpdate[2].balance, 7000);
+    });
+
+    test('テストケース[会計削除]: レコードを削除した際、残高が正しく再計算されるか検証', async () => {
+      const { getLedgerRecords, deleteLedgerRecord } = await import('../src/lib/db');
+      const records = await getLedgerRecords();
+
+      // 2件目（2026-06-15 収入10000）を削除
+      const secondRecord = records[1];
+      const deleteSuccess = await deleteLedgerRecord(secondRecord.id);
+      assert.ok(deleteSuccess);
+
+      const afterDelete = await getLedgerRecords();
+      assert.strictEqual(afterDelete.length, 2);
+
+      // 1件目: 2026-06-05 支出1000 => 残高 -1000
+      assert.strictEqual(afterDelete[0].balance, -1000);
+      // 2件目: 2026-06-25 支出2000 => 残高 -3000
+      assert.strictEqual(afterDelete[1].balance, -3000);
+    });
+  });
+
+  describe('会計分類マスタの検証', () => {
+    fs.writeFileSync(mockCategoriesPath, '[]', 'utf-8');
+
+    test('会計分類の追加・取得・削除の検証', async () => {
+      const { getCategories, addCategory, deleteCategory } = await import('../src/lib/db');
+
+      // 初期状態の取得（デフォルトで雑費、その他が入る）
+      const initial = await getCategories();
+      assert.ok(initial.some(c => c.name === '雑費'));
+      assert.ok(initial.some(c => c.name === 'その他'));
+
+      // 新規分類追加
+      const newCat = await addCategory('ボール代');
+      assert.ok(newCat.id);
+      assert.strictEqual(newCat.name, 'ボール代');
+
+      const afterAdd = await getCategories();
+      assert.ok(afterAdd.some(c => c.name === 'ボール代'));
+
+      // 削除
+      const deleteSuccess = await deleteCategory(newCat.id);
+      assert.ok(deleteSuccess);
+
+      const afterDelete = await getCategories();
+      assert.strictEqual(afterDelete.some(c => c.name === 'ボール代'), false);
     });
   });
 });
