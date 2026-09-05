@@ -75,6 +75,7 @@ export default function Home() {
     category: '雑費',
   });
   const [editingLedgerId, setEditingLedgerId] = useState<string | null>(null);
+  const [selectedLedgerAction, setSelectedLedgerAction] = useState<LedgerRecord | null>(null);
 
   const [facilityForm, setFacilityForm] = useState({
     id: '',
@@ -807,6 +808,9 @@ export default function Home() {
         if (r.lightHours > 0) {
           text += `照明代: ${r.lightHours}時間 = ${r.lightFee.toLocaleString()}円\n`;
         }
+        if (r.memo) {
+          text += `メモ: ${r.memo}\n`;
+        }
         text += `【小計: ${r.totalFee.toLocaleString()}円】\n`;
       }
 
@@ -1522,6 +1526,9 @@ export default function Home() {
                     {displayedLedgerRecords.length} 件
                   </span>
                 </h3>
+                <p style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', margin: '0.35rem 0 0 0' }}>
+                  ※ データをタップすると編集・削除ができます
+                </p>
               </div>
               {displayedLedgerRecords.length === 0 ? (
                 <p style={{ color: 'var(--color-text-muted)', textAlign: 'center', padding: '2rem 0' }}>
@@ -1532,11 +1539,10 @@ export default function Home() {
                   <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.875rem' }}>
                     <thead>
                       <tr style={{ borderBottom: '1px solid var(--border-color)', color: 'var(--color-text-muted)' }}>
-                        <th style={{ textAlign: 'left', padding: '8px 6px', fontWeight: 600 }}>日付</th>
-                        <th style={{ textAlign: 'left', padding: '8px 6px', fontWeight: 600 }}>摘要 / 分類</th>
-                        <th style={{ textAlign: 'right', padding: '8px 6px', fontWeight: 600 }}>収支</th>
-                        <th style={{ textAlign: 'right', padding: '8px 6px', fontWeight: 600 }}>残高</th>
-                        <th style={{ textAlign: 'center', padding: '8px 6px', fontWeight: 600, width: '110px' }}>操作</th>
+                        <th style={{ textAlign: 'left', padding: '10px 8px', fontWeight: 600 }}>日付</th>
+                        <th style={{ textAlign: 'left', padding: '10px 8px', fontWeight: 600 }}>摘要 / 分類</th>
+                        <th style={{ textAlign: 'right', padding: '10px 8px', fontWeight: 600 }}>収支</th>
+                        <th style={{ textAlign: 'right', padding: '10px 8px', fontWeight: 600 }}>残高</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -1546,17 +1552,20 @@ export default function Home() {
                         return (
                           <tr
                             key={record.id}
+                            className="ledger-table-row"
+                            onClick={() => setSelectedLedgerAction(record)}
                             style={{
                               borderBottom: '1px solid rgba(255,255,255,0.04)',
-                              background: isEditingThis ? 'rgba(6, 182, 212, 0.08)' : undefined,
+                              background: isEditingThis ? 'rgba(6, 182, 212, 0.12)' : undefined,
                             }}
+                            title="タップして編集または削除"
                           >
                             {/* 日付 */}
-                            <td style={{ padding: '10px 6px', verticalAlign: 'middle', whiteSpace: 'nowrap' }}>
+                            <td style={{ padding: '12px 8px', verticalAlign: 'middle', whiteSpace: 'nowrap' }}>
                               {record.date.replace(/^\d{4}-/, '')}
                             </td>
                             {/* 摘要・分類 */}
-                            <td style={{ padding: '10px 6px', verticalAlign: 'middle' }}>
+                            <td style={{ padding: '12px 8px', verticalAlign: 'middle' }}>
                               <div style={{ fontWeight: 500, wordBreak: 'break-all' }}>{record.description}</div>
                               <span style={{
                                 fontSize: '0.72rem',
@@ -1572,7 +1581,7 @@ export default function Home() {
                             </td>
                             {/* 金額 */}
                             <td style={{
-                              padding: '10px 6px',
+                              padding: '12px 8px',
                               textAlign: 'right',
                               verticalAlign: 'middle',
                               fontWeight: 600,
@@ -1583,46 +1592,13 @@ export default function Home() {
                             </td>
                             {/* 残高 */}
                             <td style={{
-                              padding: '10px 6px',
+                              padding: '12px 8px',
                               textAlign: 'right',
                               verticalAlign: 'middle',
                               color: 'var(--color-text-muted)',
                               whiteSpace: 'nowrap'
                             }}>
                               {record.balance.toLocaleString()}
-                            </td>
-                            {/* 操作ボタン */}
-                            <td style={{ padding: '10px 6px', textAlign: 'center', verticalAlign: 'middle', whiteSpace: 'nowrap' }}>
-                              <div style={{ display: 'flex', gap: '4px', justifyContent: 'center' }}>
-                                <button
-                                  className="btn btn-secondary"
-                                  style={{
-                                    width: 'auto',
-                                    padding: '3px 8px',
-                                    fontSize: '0.72rem',
-                                    color: 'var(--color-secondary)',
-                                    borderColor: 'rgba(6,182,212,0.3)',
-                                    background: 'rgba(6,182,212,0.03)',
-                                  }}
-                                  onClick={() => handleEditLedger(record)}
-                                >
-                                  編集
-                                </button>
-                                <button
-                                  className="btn btn-secondary"
-                                  style={{
-                                    width: 'auto',
-                                    padding: '3px 8px',
-                                    fontSize: '0.72rem',
-                                    color: 'var(--color-accent)',
-                                    borderColor: 'rgba(244,63,94,0.3)',
-                                    background: 'rgba(244,63,94,0.03)',
-                                  }}
-                                  onClick={() => handleDeleteLedger(record.id)}
-                                >
-                                  削除
-                                </button>
-                              </div>
                             </td>
                           </tr>
                         );
@@ -1632,6 +1608,149 @@ export default function Home() {
                 </div>
               )}
             </div>
+
+            {/* 会計データ選択・操作ポップアップモーダル */}
+            {selectedLedgerAction && (
+              <div
+                className="action-modal-backdrop"
+                onClick={(e) => {
+                  if (e.target === e.currentTarget) {
+                    setSelectedLedgerAction(null);
+                  }
+                }}
+              >
+                <div className="action-modal-card" role="dialog" aria-modal="true" aria-labelledby="ledger-action-title">
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
+                    <h4 id="ledger-action-title" style={{ fontSize: '1.1rem', fontWeight: 600, color: 'var(--color-text-main)', margin: 0, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                      <span>⚙️</span> 会計データの操作
+                    </h4>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedLedgerAction(null)}
+                      style={{
+                        background: 'transparent',
+                        border: 'none',
+                        color: 'var(--color-text-muted)',
+                        fontSize: '1.25rem',
+                        cursor: 'pointer',
+                        padding: '4px 8px',
+                        lineHeight: 1,
+                      }}
+                      aria-label="閉じる"
+                    >
+                      ✕
+                    </button>
+                  </div>
+
+                  {/* プレビュー表示 */}
+                  <div style={{
+                    background: 'rgba(255, 255, 255, 0.04)',
+                    border: '1px solid rgba(255, 255, 255, 0.08)',
+                    borderRadius: '0.75rem',
+                    padding: '1rem',
+                    marginBottom: '1.25rem',
+                  }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+                      <span style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)' }}>
+                        📅 {selectedLedgerAction.date}
+                      </span>
+                      <div style={{ display: 'flex', gap: '0.35rem' }}>
+                        <span style={{
+                          fontSize: '0.75rem',
+                          padding: '2px 8px',
+                          borderRadius: '4px',
+                          fontWeight: 600,
+                          background: selectedLedgerAction.income > 0 ? 'rgba(16, 185, 129, 0.15)' : 'rgba(244, 63, 94, 0.15)',
+                          color: selectedLedgerAction.income > 0 ? 'var(--color-success)' : 'var(--color-accent)',
+                        }}>
+                          {selectedLedgerAction.income > 0 ? '収入' : '支出'}
+                        </span>
+                        <span style={{
+                          fontSize: '0.75rem',
+                          color: 'var(--color-text-muted)',
+                          background: 'rgba(255,255,255,0.06)',
+                          padding: '2px 8px',
+                          borderRadius: '4px',
+                        }}>
+                          {selectedLedgerAction.category}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div style={{ fontSize: '1.05rem', fontWeight: 600, marginBottom: '0.6rem', wordBreak: 'break-all' }}>
+                      {selectedLedgerAction.description}
+                    </div>
+
+                    <div style={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'baseline',
+                      borderTop: '1px solid rgba(255, 255, 255, 0.06)',
+                      paddingTop: '0.5rem',
+                      marginTop: '0.5rem'
+                    }}>
+                      <span style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)' }}>金額</span>
+                      <span style={{
+                        fontSize: '1.35rem',
+                        fontWeight: 700,
+                        color: selectedLedgerAction.income > 0 ? 'var(--color-success)' : 'var(--color-accent)'
+                      }}>
+                        {selectedLedgerAction.income > 0
+                          ? `+${selectedLedgerAction.income.toLocaleString()} 円`
+                          : `-${selectedLedgerAction.expense.toLocaleString()} 円`}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* 操作ボタン */}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.65rem' }}>
+                    <button
+                      type="button"
+                      className="btn btn-primary"
+                      style={{
+                        background: 'linear-gradient(135deg, var(--color-secondary), #0284c7)',
+                        boxShadow: '0 0 15px rgba(6, 182, 212, 0.3)',
+                        padding: '0.8rem 1rem',
+                        fontSize: '0.95rem',
+                      }}
+                      onClick={() => {
+                        const record = selectedLedgerAction;
+                        setSelectedLedgerAction(null);
+                        handleEditLedger(record);
+                      }}
+                    >
+                      ✏️ このデータを編集する
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      style={{
+                        color: 'var(--color-accent)',
+                        borderColor: 'rgba(244, 63, 94, 0.4)',
+                        background: 'rgba(244, 63, 94, 0.08)',
+                        padding: '0.8rem 1rem',
+                        fontSize: '0.95rem',
+                      }}
+                      onClick={() => {
+                        const id = selectedLedgerAction.id;
+                        setSelectedLedgerAction(null);
+                        handleDeleteLedger(id);
+                      }}
+                    >
+                      🗑️ このデータを削除する
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      style={{ padding: '0.65rem 1rem', marginTop: '0.25rem' }}
+                      onClick={() => setSelectedLedgerAction(null)}
+                    >
+                      キャンセル
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
           </section>
         );
       })()}

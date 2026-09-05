@@ -543,7 +543,7 @@ export async function getReservations(): Promise<Reservation[]> {
       const sheets = getSheetsClient();
       const response = await sheets.spreadsheets.values.get({
         spreadsheetId: SPREADSHEET_ID,
-        range: 'records!A2:O',
+        range: 'records!A2:P',
       });
 
       const rows = response.data.values;
@@ -1163,7 +1163,7 @@ export async function updateReservationsStatusByReserverMonth(
     const sheets = getSheetsClient();
     const response = await sheets.spreadsheets.values.get({
       spreadsheetId: SPREADSHEET_ID,
-      range: 'records!A:O',
+      range: 'records!A:P',
     });
 
     const rows = response.data.values;
