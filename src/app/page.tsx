@@ -1573,7 +1573,7 @@ export default function Home() {
                         handleToggleCancel(r.id, r.status);
                       }}
                     >
-                      {selectedReservationAction.status === 'cancelled' ? '↩️ 予約を復元' : '🚫 キャンセル'}
+                      {selectedReservationAction.status === 'cancelled' ? '↩️ 予約を復元' : '🚫 予約取消'}
                     </button>
 
                     <button
