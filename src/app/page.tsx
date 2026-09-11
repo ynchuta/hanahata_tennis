@@ -2064,7 +2064,7 @@ export default function Home() {
                       style={{ padding: '0.65rem 1rem', marginTop: '0.25rem' }}
                       onClick={() => setSelectedLedgerAction(null)}
                     >
-                      予約取消
+                      キャンセル
                     </button>
                   </div>
                 </div>
