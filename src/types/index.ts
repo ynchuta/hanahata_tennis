@@ -9,7 +9,7 @@ export interface Facility {
 }
 
 export type FeeType = '大人' | '子供';
-export type SettlementStatus = '未精算' | '精算済';
+export type SettlementStatus = '未返金' | '返金済' | '窓口精算' | '未精算' | '精算済';
 
 export interface Reservation {
   id: string;

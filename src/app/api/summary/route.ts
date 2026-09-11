@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getReservations } from '@/lib/db';
-import { MonthlyReportRow } from '@/types';
+import { MonthlyReportRow, SettlementStatus } from '@/types';
 
 export const dynamic = 'force-dynamic';
 
@@ -28,14 +28,16 @@ export async function GET(req: NextRequest) {
     }
 
     const report: MonthlyReportRow[] = Array.from(summaryMap.entries()).map(([reserverName, list]) => {
-      // 立替合計金額を計算 (status === "cancelled" のデータは除外)
+      // status === "cancelled" のデータは除外
       const activeList = list.filter((r) => r.status !== 'cancelled');
-      const totalAmount = activeList.reduce((sum, r) => sum + r.totalFee, 0);
+      // 窓口精算は立替・返金額集計から除外
+      const refundList = activeList.filter((r) => r.settlementStatus !== '窓口精算');
+      const totalAmount = refundList.reduce((sum, r) => sum + r.totalFee, 0);
 
-      // その月のすべての有効な予約が精算済みかどうかを判定
-      const settlementStatus = activeList.length > 0
-        ? (activeList.every((r) => r.settlementStatus === '精算済') ? '精算済' : '未精算')
-        : '精算済';
+      // 返金対象の予約がすべて返金済かどうかを判定
+      const settlementStatus: SettlementStatus = refundList.length > 0
+        ? (refundList.every((r) => r.settlementStatus === '返金済' || r.settlementStatus === '精算済') ? '返金済' : '未返金')
+        : '返金済';
 
       return {
         reserverName,
@@ -62,7 +64,8 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
     }
 
-    if (settlementStatus !== '未精算' && settlementStatus !== '精算済') {
+    const validStatuses = ['未返金', '返金済', '未精算', '精算済'];
+    if (!validStatuses.includes(settlementStatus)) {
       return NextResponse.json({ error: 'Invalid settlementStatus value' }, { status: 400 });
     }
 

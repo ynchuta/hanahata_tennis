@@ -21,8 +21,9 @@ export async function PATCH(
 
     let updatedRecord;
 
+    const validSettlementStatuses = ['未返金', '返金済', '窓口精算', '未精算', '精算済'];
     if (settlementStatusVal !== undefined) {
-      if (settlementStatusVal !== '未精算' && settlementStatusVal !== '精算済') {
+      if (!validSettlementStatuses.includes(settlementStatusVal)) {
         return NextResponse.json({ error: 'Invalid settlementStatus value' }, { status: 400 });
       }
       updatedRecord = await updateReservationSettlementStatus(id, settlementStatusVal);

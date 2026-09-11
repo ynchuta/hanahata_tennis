@@ -1,9 +1,12 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert';
-import { calculateFees } from '../src/lib/calculator';
-import { Facility } from '../src/types';
 import fs from 'fs';
 import path from 'path';
+
+process.env.USE_MOCK = 'true';
+
+import { calculateFees } from '../src/lib/calculator';
+import { Facility } from '../src/types';
 
 const hibaru: Facility = {
   id: '1',
@@ -314,6 +317,67 @@ describe('テニス部ナイター費精算管理システム テストスイー
 
       const afterDelete = await getCategories();
       assert.strictEqual(afterDelete.some(c => c.name === 'ボール代'), false);
+    });
+  });
+
+  describe('窓口精算・保護者返金ステータス機能の検証', () => {
+    test('窓口精算として予約登録およびステータス取得の検証', async () => {
+      const { addFacility, addReservation, getReservations, updateReservationSettlementStatus, updateReservationsStatusByReserverMonth } = await import('../src/lib/db');
+
+      const fac = await addFacility({
+        name: '窓口精算テスト施設',
+        adultRatePerHour: 1000,
+        childRatePerHour: 500,
+        lightRatePerHour: 300,
+        allowChildRate: true,
+      });
+
+      // 1. 窓口精算として予約登録
+      const rCounter = await addReservation({
+        date: '2026-07-10',
+        facilityId: fac.id,
+        reserverName: '保護者C',
+        courtStartTime: '18:00',
+        courtEndTime: '20:00',
+        lightHours: 0,
+        feeType: '大人',
+        memo: '窓口現金払い',
+        settlementStatus: '窓口精算',
+        status: 'active',
+      });
+      assert.strictEqual(rCounter.settlementStatus, '窓口精算');
+
+      // 2. 通常の立替予約登録（未返金）
+      const rAdvance = await addReservation({
+        date: '2026-07-15',
+        facilityId: fac.id,
+        reserverName: '保護者C',
+        courtStartTime: '18:00',
+        courtEndTime: '20:00',
+        lightHours: 0,
+        feeType: '大人',
+        memo: '立替',
+        settlementStatus: '未返金',
+        status: 'active',
+      });
+      assert.strictEqual(rAdvance.settlementStatus, '未返金');
+
+      // 3. 単体ステータス更新の検証（未返金 → 返金済）
+      const updatedAdvance = await updateReservationSettlementStatus(rAdvance.id, '返金済');
+      assert.ok(updatedAdvance);
+      assert.strictEqual(updatedAdvance.settlementStatus, '返金済');
+
+      // 4. 一括更新（返金済 → 未返金）時に窓口精算が巻き込まれず維持されるかの検証
+      const count = await updateReservationsStatusByReserverMonth('2026-07', '保護者C', '未返金');
+      // 立替予約1件のみが更新され、窓口精算は更新されない
+      assert.strictEqual(count, 1);
+
+      const allRecords = await getReservations();
+      const checkCounter = allRecords.find((r) => r.id === rCounter.id);
+      const checkAdvance = allRecords.find((r) => r.id === rAdvance.id);
+
+      assert.strictEqual(checkCounter?.settlementStatus, '窓口精算');
+      assert.strictEqual(checkAdvance?.settlementStatus, '未返金');
     });
   });
 });

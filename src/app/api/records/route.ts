@@ -79,6 +79,7 @@ export async function POST(req: NextRequest) {
       lightStartTime = '',
       feeType,
       memo = '',
+      settlementStatus = '未返金',
     } = body;
 
     if (!date || !facilityName || !reserverName || !courtStartTime || !courtEndTime || !feeType) {
@@ -102,7 +103,7 @@ export async function POST(req: NextRequest) {
       lightStartTime,
       feeType,
       memo,
-      settlementStatus: '未精算',
+      settlementStatus: settlementStatus || '未返金',
       status: 'active',
     });
 

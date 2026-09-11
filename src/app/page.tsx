@@ -57,9 +57,10 @@ export default function Home() {
     lightStartTime: '',
     feeType: '大人' as FeeType,
     memo: '',
-    settlementStatus: '未精算' as SettlementStatus,
+    settlementStatus: '未返金' as SettlementStatus,
     status: 'active' as 'active' | 'cancelled',
   });
+  const [selectedReservationAction, setSelectedReservationAction] = useState<Reservation | null>(null);
 
   // 会計分類リスト（DB・API経由で管理）
   const [categories, setCategories] = useState<string[]>(['雑費', 'その他']);
@@ -465,7 +466,7 @@ export default function Home() {
             lightHours: calculatedHours,
             memo: '',
             feeType: (currentFacility && currentFacility.allowChildRate) ? '子供' : '大人',
-            settlementStatus: '未精算',
+            settlementStatus: '未返金',
             status: 'active',
           };
         });
@@ -484,6 +485,11 @@ export default function Home() {
 
   // 予約編集を開始する
   const handleEditReservation = (r: Reservation) => {
+    // 過去ステータスを正規化
+    const normalizedSettlement = (r.settlementStatus === '精算済' || r.settlementStatus === '返金済')
+      ? '返金済'
+      : (r.settlementStatus === '窓口精算' ? '窓口精算' : '未返金');
+
     setFormData({
       facilityName: r.facilityName,
       reserverName: r.reserverName,
@@ -493,7 +499,7 @@ export default function Home() {
       lightStartTime: r.lightStartTime ? r.lightStartTime.slice(0, 5) : '',
       feeType: r.feeType,
       memo: r.memo,
-      settlementStatus: r.settlementStatus,
+      settlementStatus: normalizedSettlement as SettlementStatus,
       status: r.status,
     });
     setEditingReservationId(r.id);
@@ -501,9 +507,17 @@ export default function Home() {
     setIsFormOpen(true);
   };
 
-  const handleToggleStatus = async (id: string, currentStatus: SettlementStatus) => {
-    const nextStatus = currentStatus === '未精算' ? '精算済' : '未精算';
+  // 予約の返金/支払ステータス変更ハンドラ
+  const handleChangeSettlementStatus = async (id: string, nextStatus: SettlementStatus) => {
+    const targetReservation = reservations.find((r) => r.id === id);
+    const currentStatus = targetReservation?.settlementStatus || '未返金';
+
+    // 楽観的更新
     setReservations((prev) => prev.map((r) => r.id === id ? { ...r, settlementStatus: nextStatus } : r));
+    if (selectedReservationAction && selectedReservationAction.id === id) {
+      setSelectedReservationAction((prev) => prev ? { ...prev, settlementStatus: nextStatus } : null);
+    }
+
     showToast('ステータス更新中...', 0, true);
     try {
       const res = await fetch(`/api/records/${id}`, {
@@ -514,22 +528,41 @@ export default function Home() {
       if (res.ok) {
         const updated = await res.json();
         setReservations((prev) => prev.map((r) => r.id === id ? updated : r));
+        if (selectedReservationAction && selectedReservationAction.id === id) {
+          setSelectedReservationAction(updated);
+        }
         await fetchLedgerRecords(); // 会計データを再取得
-        showToast('精算ステータスを更新しました！');
+        showToast('ステータスを更新しました！');
       } else {
         setReservations((prev) => prev.map((r) => r.id === id ? { ...r, settlementStatus: currentStatus } : r));
+        if (selectedReservationAction && selectedReservationAction.id === id) {
+          setSelectedReservationAction((prev) => prev ? { ...prev, settlementStatus: currentStatus } : null);
+        }
         showToast('ステータス更新に失敗しました');
       }
     } catch (err) {
       console.error(err);
       setReservations((prev) => prev.map((r) => r.id === id ? { ...r, settlementStatus: currentStatus } : r));
+      if (selectedReservationAction && selectedReservationAction.id === id) {
+        setSelectedReservationAction((prev) => prev ? { ...prev, settlementStatus: currentStatus } : null);
+      }
       showToast('通信エラーが発生しました');
     }
+  };
+
+  // レポートタブ等での返金トグル（未返金 ⇔ 返金済）
+  const handleToggleStatus = async (id: string, currentStatus: SettlementStatus) => {
+    const isSettled = currentStatus === '精算済' || currentStatus === '返金済';
+    const nextStatus: SettlementStatus = isSettled ? '未返金' : '返金済';
+    await handleChangeSettlementStatus(id, nextStatus);
   };
 
   const handleToggleCancel = async (id: string, currentCancelStatus: 'active' | 'cancelled') => {
     const nextCancelStatus = currentCancelStatus === 'active' ? 'cancelled' : 'active';
     setReservations((prev) => prev.map((r) => r.id === id ? { ...r, status: nextCancelStatus } : r));
+    if (selectedReservationAction && selectedReservationAction.id === id) {
+      setSelectedReservationAction((prev) => prev ? { ...prev, status: nextCancelStatus } : null);
+    }
     showToast('キャンセルステータス更新中...', 0, true);
     try {
       const res = await fetch(`/api/records/${id}`, {
@@ -540,24 +573,34 @@ export default function Home() {
       if (res.ok) {
         const updated = await res.json();
         setReservations((prev) => prev.map((r) => r.id === id ? updated : r));
+        if (selectedReservationAction && selectedReservationAction.id === id) {
+          setSelectedReservationAction(updated);
+        }
         showToast(nextCancelStatus === 'cancelled' ? '予約をキャンセルしました' : '予約を復元しました');
       } else {
         setReservations((prev) => prev.map((r) => r.id === id ? { ...r, status: currentCancelStatus } : r));
+        if (selectedReservationAction && selectedReservationAction.id === id) {
+          setSelectedReservationAction((prev) => prev ? { ...prev, status: currentCancelStatus } : null);
+        }
         showToast('キャンセル処理に失敗しました');
       }
     } catch (err) {
       console.error(err);
       setReservations((prev) => prev.map((r) => r.id === id ? { ...r, status: currentCancelStatus } : r));
+      if (selectedReservationAction && selectedReservationAction.id === id) {
+        setSelectedReservationAction((prev) => prev ? { ...prev, status: currentCancelStatus } : null);
+      }
       showToast('通信エラーが発生しました');
     }
   };
 
   const handleToggleBulkStatus = async (reserverName: string, currentStatus: SettlementStatus) => {
-    const nextStatus = currentStatus === '未精算' ? '精算済' : '未精算';
-    // 楽観的 UI アップデート（該当月と保護者名の予約レコードを即座に書き換える）
+    const isSettled = currentStatus === '精算済' || currentStatus === '返金済';
+    const nextStatus: SettlementStatus = isSettled ? '未返金' : '返金済';
+    // 楽観的 UI アップデート（窓口精算は除外して書き換える）
     setReservations((prev) =>
       prev.map((r) =>
-        (r.date.startsWith(reportMonth) && r.reserverName === reserverName)
+        (r.date.startsWith(reportMonth) && r.reserverName === reserverName && r.settlementStatus !== '窓口精算')
           ? { ...r, settlementStatus: nextStatus }
           : r
       )
@@ -576,7 +619,7 @@ export default function Home() {
       if (res.ok) {
         await fetchReservations();
         await fetchLedgerRecords(); // 会計データを再取得
-        showToast('一括精算ステータスを更新しました！');
+        showToast('一括返金ステータスを更新しました！');
       } else {
         await fetchReservations();
         showToast('一括更新に失敗しました');
@@ -811,7 +854,11 @@ export default function Home() {
         if (r.memo) {
           text += `メモ: ${r.memo}\n`;
         }
-        text += `【小計: ${r.totalFee.toLocaleString()}円】\n`;
+        if (r.settlementStatus === '窓口精算') {
+          text += `【小計: ${r.totalFee.toLocaleString()}円】（窓口精算済み・返金対象外）\n`;
+        } else {
+          text += `【小計: ${r.totalFee.toLocaleString()}円】\n`;
+        }
       }
 
       text += `\n■合計返金額: ${parent.totalAmount.toLocaleString()}円\n`;
@@ -984,10 +1031,13 @@ export default function Home() {
                         <div className="day-reserver-list">
                           {dayReservations.map((r) => {
                             const isCancelled = r.status === 'cancelled';
+                            const isSettled = r.settlementStatus === '精算済' || r.settlementStatus === '返金済';
+                            const isCounter = r.settlementStatus === '窓口精算';
+                            const statusClass = isCounter ? 'counter' : (isSettled ? 'settled' : 'unsettled');
                             return (
                               <div
                                 key={r.id}
-                                className={`day-reserver-name ${r.settlementStatus === '精算済' ? 'settled' : 'unsettled'}`}
+                                className={`day-reserver-name ${statusClass}`}
                                 style={{
                                   textDecoration: isCancelled ? 'line-through' : 'none',
                                   opacity: isCancelled ? 0.45 : 1,
@@ -1024,7 +1074,7 @@ export default function Home() {
                     lightStartTime: '',
                     feeType: facilities[0]?.allowChildRate ? '子供' : '大人',
                     memo: '',
-                    settlementStatus: '未精算',
+                    settlementStatus: '未返金',
                     status: 'active',
                   });
                   setIsFormOpen(true);
@@ -1098,6 +1148,25 @@ export default function Home() {
                   {selectedFacilityObj && !selectedFacilityObj.allowChildRate && (
                     <p className="help-text">※選択した施設は大人料金のみ適用可能です。</p>
                   )}
+                </div>
+
+                {/* 支払方法 / 返金ステータス */}
+                <div className="form-group">
+                  <label className="form-label">支払方法 / 返金ステータス</label>
+                  <select
+                    className="form-select"
+                    value={formData.settlementStatus}
+                    onChange={(e) => setFormData((prev) => ({ ...prev, settlementStatus: e.target.value as SettlementStatus }))}
+                  >
+                    <option value="未返金">立替払い（未返金 - 保護者への返金待ち）</option>
+                    <option value="返金済">立替払い（返金済 - 返金完了）</option>
+                    <option value="窓口精算">窓口精算（返金対象外 - 窓口で直接支払）</option>
+                  </select>
+                  <p className="help-text">
+                    {formData.settlementStatus === '窓口精算'
+                      ? '※窓口精算の予約は、保護者別の立替・返金額集計から除外されます。'
+                      : '※立替払いの予約は、保護者別の立替・返金額集計の対象となります。'}
+                  </p>
                 </div>
 
                 {/* コート利用時間 */}
@@ -1207,78 +1276,330 @@ export default function Home() {
                 この日の予約はありません
               </p>
             ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-                {currentDayReservations.map((r) => {
-                  const isCancelled = r.status === 'cancelled';
-                  return (
-                    <div
-                      key={r.id}
-                      className="reservation-item"
-                      style={{
-                        opacity: isCancelled ? 0.6 : 1,
-                        background: isCancelled ? 'rgba(255, 255, 255, 0.02)' : undefined,
-                        borderLeft: isCancelled ? '3px solid var(--color-text-muted)' : undefined,
-                      }}
-                    >
-                      <div className="reservation-item-header">
-                        <div>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                            <span style={{ fontWeight: 600, fontSize: '1.05rem', textDecoration: isCancelled ? 'line-through' : 'none' }}>
-                              {r.reserverName}
-                            </span>
-                            {isCancelled && (
-                              <span style={{ fontSize: '0.75rem', background: 'rgba(244,63,94,0.15)', color: 'var(--color-accent)', padding: '2px 6px', borderRadius: '4px' }}>
-                                キャンセル済み
+              <div>
+                <p style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', textAlign: 'center', marginBottom: '0.75rem' }}>
+                  ※ 予約をタップすると操作（返金状態・編集・キャンセル・削除）ができます
+                </p>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                  {currentDayReservations.map((r) => {
+                    const isCancelled = r.status === 'cancelled';
+                    const isSettled = r.settlementStatus === '精算済' || r.settlementStatus === '返金済';
+                    const isCounter = r.settlementStatus === '窓口精算';
+                    const isEditingThis = editingReservationId === r.id;
+
+                    return (
+                      <div
+                        key={r.id}
+                        className="reservation-item clickable"
+                        onClick={() => setSelectedReservationAction(r)}
+                        style={{
+                          opacity: isCancelled ? 0.6 : 1,
+                          background: isEditingThis
+                            ? 'rgba(6, 182, 212, 0.12)'
+                            : (isCancelled ? 'rgba(255, 255, 255, 0.02)' : undefined),
+                          borderLeft: isCancelled
+                            ? '3px solid var(--color-text-muted)'
+                            : (isCounter ? '3px solid var(--color-secondary)' : undefined),
+                        }}
+                        title="タップして操作メニューを表示"
+                      >
+                        <div className="reservation-item-header">
+                          <div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                              <span style={{ fontWeight: 600, fontSize: '1.05rem', textDecoration: isCancelled ? 'line-through' : 'none' }}>
+                                {r.reserverName}
                               </span>
+                              {isCancelled && (
+                                <span style={{ fontSize: '0.75rem', background: 'rgba(244,63,94,0.15)', color: 'var(--color-accent)', padding: '2px 6px', borderRadius: '4px' }}>
+                                  キャンセル済み
+                                </span>
+                              )}
+                            </div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: '0.25rem' }}>
+                              <span className="facility-badge">{r.facilityName}</span>
+                              <span style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)' }}>({r.feeType})</span>
+                            </div>
+                          </div>
+                          <div>
+                            {isCounter ? (
+                              <span className="status-badge counter">窓口精算 (返金対象外)</span>
+                            ) : isSettled ? (
+                              <span className="status-badge settled">返金済</span>
+                            ) : (
+                              <span className="status-badge unsettled">未返金</span>
                             )}
                           </div>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: '0.25rem' }}>
-                            <span className="facility-badge">{r.facilityName}</span>
-                            <span style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)' }}>({r.feeType})</span>
-                          </div>
                         </div>
-                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '0.5rem' }}>
-                          <div className="settlement-checkbox-wrapper">
-                            <span style={{ fontSize: '0.85rem', color: r.settlementStatus === '精算済' ? 'var(--color-success)' : 'var(--color-accent)' }}>
-                              {r.settlementStatus}
-                            </span>
-                            <label className="switch">
-                              <input type="checkbox" checked={r.settlementStatus === '精算済'} onChange={() => handleToggleStatus(r.id, r.settlementStatus)} />
-                              <span className="slider"></span>
-                            </label>
-                          </div>
-                          <div style={{ display: 'flex', gap: '0.35rem' }}>
-                            <button className="btn btn-secondary" style={{ width: 'auto', padding: '4px 8px', fontSize: '0.7rem' }} onClick={() => handleToggleCancel(r.id, r.status)}>
-                              {isCancelled ? '戻す' : 'キャンセル'}
-                            </button>
-                            <button className="btn btn-secondary" style={{ width: 'auto', padding: '4px 8px', fontSize: '0.7rem' }} onClick={() => handleEditReservation(r)}>編集</button>
-                            <button className="btn btn-secondary" style={{ width: 'auto', padding: '4px 8px', fontSize: '0.7rem', color: 'var(--color-accent)', borderColor: 'rgba(244,63,94,0.3)' }} onClick={() => handleDeleteReservation(r.id)}>削除</button>
-                          </div>
-                        </div>
-                      </div>
 
-                      {/* コート利用詳細 */}
-                      <div style={{ marginTop: '0.6rem', paddingTop: '0.6rem', borderTop: '1px solid rgba(255,255,255,0.06)', fontSize: '0.82rem', color: 'var(--color-text-muted)', display: 'flex', flexWrap: 'wrap', gap: '0.5rem 1rem' }}>
-                        <span>⏰ {r.courtStartTime}〜{r.courtEndTime}</span>
-                        {r.lightHours > 0 && (
-                          <span>💡 照明 {r.lightHours}時間{r.lightStartTime ? `（${r.lightStartTime}〜）` : ''}</span>
+                        {/* コート利用詳細 */}
+                        <div style={{ marginTop: '0.6rem', paddingTop: '0.6rem', borderTop: '1px solid rgba(255,255,255,0.06)', fontSize: '0.82rem', color: 'var(--color-text-muted)', display: 'flex', flexWrap: 'wrap', gap: '0.5rem 1rem' }}>
+                          <span>⏰ {r.courtStartTime}〜{r.courtEndTime}</span>
+                          {r.lightHours > 0 && (
+                            <span>💡 照明 {r.lightHours}時間{r.lightStartTime ? `（${r.lightStartTime}〜）` : ''}</span>
+                          )}
+                          <span style={{ color: 'var(--color-text-main)', fontWeight: 600 }}>
+                            💴 コート {r.courtFee.toLocaleString()}円
+                            {r.lightHours > 0 && ` + 照明 ${r.lightFee.toLocaleString()}円`}
+                            {' = '}
+                            <span style={{ color: 'var(--color-secondary)' }}>{r.totalFee.toLocaleString()}円</span>
+                          </span>
+                        </div>
+                        {r.memo && (
+                          <div className="reservation-memo">📝 {r.memo}</div>
                         )}
-                        <span style={{ color: 'var(--color-text-main)', fontWeight: 600 }}>
-                          💴 コート {r.courtFee.toLocaleString()}円
-                          {r.lightHours > 0 && ` + 照明 ${r.lightFee.toLocaleString()}円`}
-                          {' = '}
-                          <span style={{ color: 'var(--color-secondary)' }}>{r.totalFee.toLocaleString()}円</span>
-                        </span>
                       </div>
-                      {r.memo && (
-                        <div className="reservation-memo">📝 {r.memo}</div>
-                      )}
-                    </div>
-                  );
-                })}
+                    );
+                  })}
+                </div>
               </div>
             )}
           </div>
+
+          {/* 予約データ選択・操作ポップアップモーダル */}
+          {selectedReservationAction && (
+            <div
+              className="action-modal-backdrop"
+              onClick={(e) => {
+                if (e.target === e.currentTarget) {
+                  setSelectedReservationAction(null);
+                }
+              }}
+            >
+              <div className="action-modal-card" role="dialog" aria-modal="true" aria-labelledby="reservation-action-title">
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
+                  <h4 id="reservation-action-title" style={{ fontSize: '1.1rem', fontWeight: 600, color: 'var(--color-text-main)', margin: 0, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                    <span>⚙️</span> 予約データの操作
+                  </h4>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedReservationAction(null)}
+                    style={{
+                      background: 'transparent',
+                      border: 'none',
+                      color: 'var(--color-text-muted)',
+                      fontSize: '1.25rem',
+                      cursor: 'pointer',
+                      padding: '4px 8px',
+                      lineHeight: 1,
+                    }}
+                    aria-label="閉じる"
+                  >
+                    ✕
+                  </button>
+                </div>
+
+                {/* プレビュー表示 */}
+                <div style={{
+                  background: 'rgba(255, 255, 255, 0.04)',
+                  border: '1px solid rgba(255, 255, 255, 0.08)',
+                  borderRadius: '0.75rem',
+                  padding: '1rem',
+                  marginBottom: '1.25rem',
+                }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+                    <span style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)' }}>
+                      📅 {selectedReservationAction.date}
+                    </span>
+                    <div style={{ display: 'flex', gap: '0.35rem' }}>
+                      <span className="facility-badge" style={{ fontSize: '0.75rem' }}>
+                        {selectedReservationAction.facilityName}
+                      </span>
+                      <span style={{
+                        fontSize: '0.75rem',
+                        color: 'var(--color-text-muted)',
+                        background: 'rgba(255,255,255,0.06)',
+                        padding: '2px 8px',
+                        borderRadius: '4px',
+                      }}>
+                        {selectedReservationAction.feeType}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}>
+                    <span style={{ fontSize: '1.1rem', fontWeight: 700, textDecoration: selectedReservationAction.status === 'cancelled' ? 'line-through' : 'none' }}>
+                      {selectedReservationAction.reserverName}
+                    </span>
+                    {selectedReservationAction.status === 'cancelled' && (
+                      <span style={{ fontSize: '0.75rem', background: 'rgba(244,63,94,0.15)', color: 'var(--color-accent)', padding: '2px 6px', borderRadius: '4px' }}>
+                        キャンセル済み
+                      </span>
+                    )}
+                  </div>
+
+                  <div style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)', marginBottom: '0.5rem' }}>
+                    ⏰ {selectedReservationAction.courtStartTime}〜{selectedReservationAction.courtEndTime}
+                    {selectedReservationAction.lightHours > 0 && ` | 照明 ${selectedReservationAction.lightHours}時間`}
+                  </div>
+
+                  {selectedReservationAction.memo && (
+                    <div className="reservation-memo" style={{ marginBottom: '0.5rem' }}>
+                      📝 {selectedReservationAction.memo}
+                    </div>
+                  )}
+
+                  <div style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'baseline',
+                    borderTop: '1px solid rgba(255, 255, 255, 0.06)',
+                    paddingTop: '0.5rem',
+                    marginTop: '0.5rem'
+                  }}>
+                    <span style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)' }}>合計金額</span>
+                    <span style={{
+                      fontSize: '1.35rem',
+                      fontWeight: 700,
+                      color: 'var(--color-secondary)'
+                    }}>
+                      {selectedReservationAction.totalFee.toLocaleString()} 円
+                    </span>
+                  </div>
+                </div>
+
+                {/* ステータス切替セクション */}
+                <div style={{ marginBottom: '1.25rem' }}>
+                  <div style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)', marginBottom: '0.5rem', fontWeight: 600 }}>
+                    支払・返金ステータスの変更
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1.2fr', gap: '0.4rem' }}>
+                    <button
+                      type="button"
+                      onClick={() => handleChangeSettlementStatus(selectedReservationAction.id, '未返金')}
+                      style={{
+                        padding: '8px 4px',
+                        fontSize: '0.78rem',
+                        borderRadius: '6px',
+                        fontWeight: 600,
+                        cursor: 'pointer',
+                        transition: 'all 0.15s ease',
+                        border: (selectedReservationAction.settlementStatus === '未返金' || selectedReservationAction.settlementStatus === '未精算')
+                          ? '2px solid var(--color-accent)'
+                          : '1px solid rgba(255,255,255,0.1)',
+                        background: (selectedReservationAction.settlementStatus === '未返金' || selectedReservationAction.settlementStatus === '未精算')
+                          ? 'rgba(244, 63, 94, 0.25)'
+                          : 'rgba(255,255,255,0.04)',
+                        color: (selectedReservationAction.settlementStatus === '未返金' || selectedReservationAction.settlementStatus === '未精算')
+                          ? 'var(--color-accent)'
+                          : 'var(--color-text-muted)',
+                      }}
+                    >
+                      {(selectedReservationAction.settlementStatus === '未返金' || selectedReservationAction.settlementStatus === '未精算') ? '● 未返金' : '未返金'}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => handleChangeSettlementStatus(selectedReservationAction.id, '返金済')}
+                      style={{
+                        padding: '8px 4px',
+                        fontSize: '0.78rem',
+                        borderRadius: '6px',
+                        fontWeight: 600,
+                        cursor: 'pointer',
+                        transition: 'all 0.15s ease',
+                        border: (selectedReservationAction.settlementStatus === '返金済' || selectedReservationAction.settlementStatus === '精算済')
+                          ? '2px solid var(--color-success)'
+                          : '1px solid rgba(255,255,255,0.1)',
+                        background: (selectedReservationAction.settlementStatus === '返金済' || selectedReservationAction.settlementStatus === '精算済')
+                          ? 'rgba(16, 185, 129, 0.25)'
+                          : 'rgba(255,255,255,0.04)',
+                        color: (selectedReservationAction.settlementStatus === '返金済' || selectedReservationAction.settlementStatus === '精算済')
+                          ? 'var(--color-success)'
+                          : 'var(--color-text-muted)',
+                      }}
+                    >
+                      {(selectedReservationAction.settlementStatus === '返金済' || selectedReservationAction.settlementStatus === '精算済') ? '● 返金済' : '返金済'}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => handleChangeSettlementStatus(selectedReservationAction.id, '窓口精算')}
+                      style={{
+                        padding: '8px 4px',
+                        fontSize: '0.78rem',
+                        borderRadius: '6px',
+                        fontWeight: 600,
+                        cursor: 'pointer',
+                        transition: 'all 0.15s ease',
+                        border: selectedReservationAction.settlementStatus === '窓口精算'
+                          ? '2px solid var(--color-secondary)'
+                          : '1px solid rgba(255,255,255,0.1)',
+                        background: selectedReservationAction.settlementStatus === '窓口精算'
+                          ? 'rgba(6, 182, 212, 0.25)'
+                          : 'rgba(255,255,255,0.04)',
+                        color: selectedReservationAction.settlementStatus === '窓口精算'
+                          ? 'var(--color-secondary)'
+                          : 'var(--color-text-muted)',
+                      }}
+                    >
+                      {selectedReservationAction.settlementStatus === '窓口精算' ? '● 窓口精算' : '窓口精算'}
+                    </button>
+                  </div>
+                  <p style={{ fontSize: '0.72rem', color: 'var(--color-text-muted)', marginTop: '0.35rem', marginBottom: 0 }}>
+                    ※ 窓口精算は保護者への返金集計（月末レポート）から除外されます
+                  </p>
+                </div>
+
+                {/* 操作ボタン */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.65rem' }}>
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    style={{
+                      background: 'linear-gradient(135deg, var(--color-secondary), #0284c7)',
+                      boxShadow: '0 0 15px rgba(6, 182, 212, 0.3)',
+                      padding: '0.8rem 1rem',
+                      fontSize: '0.95rem',
+                    }}
+                    onClick={() => {
+                      const r = selectedReservationAction;
+                      setSelectedReservationAction(null);
+                      handleEditReservation(r);
+                    }}
+                  >
+                    ✏️ この予約を編集する
+                  </button>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.65rem' }}>
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      style={{
+                        padding: '0.7rem 0.5rem',
+                        fontSize: '0.85rem',
+                        borderColor: selectedReservationAction.status === 'cancelled' ? 'rgba(16, 185, 129, 0.4)' : 'rgba(255, 255, 255, 0.15)',
+                        color: selectedReservationAction.status === 'cancelled' ? 'var(--color-success)' : 'var(--color-text-main)',
+                      }}
+                      onClick={() => {
+                        const r = selectedReservationAction;
+                        handleToggleCancel(r.id, r.status);
+                      }}
+                    >
+                      {selectedReservationAction.status === 'cancelled' ? '↩️ 予約を復元' : '🚫 キャンセル'}
+                    </button>
+
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      style={{
+                        padding: '0.7rem 0.5rem',
+                        fontSize: '0.85rem',
+                        color: 'var(--color-accent)',
+                        borderColor: 'rgba(244, 63, 94, 0.4)',
+                      }}
+                      onClick={() => {
+                        const r = selectedReservationAction;
+                        setSelectedReservationAction(null);
+                        handleDeleteReservation(r.id);
+                      }}
+                    >
+                      🗑️ 削除する
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
         </section>
       )}
 
@@ -1802,19 +2123,24 @@ export default function Home() {
                           <span style={{ fontWeight: 700, color: 'var(--color-secondary)' }}>
                             {parent.totalAmount.toLocaleString()}円
                           </span>
-                          <div className="settlement-checkbox-wrapper">
-                            <span className={`status-badge ${parent.settlementStatus === '精算済' ? 'settled' : 'unsettled'}`}>
-                              {parent.settlementStatus}
-                            </span>
-                            <label className="switch">
-                              <input
-                                type="checkbox"
-                                checked={parent.settlementStatus === '精算済'}
-                                onChange={() => handleToggleBulkStatus(parent.reserverName, parent.settlementStatus)}
-                              />
-                              <span className="slider"></span>
-                            </label>
-                          </div>
+                          {(() => {
+                            const isParentSettled = parent.settlementStatus === '精算済' || parent.settlementStatus === '返金済';
+                            return (
+                              <div className="settlement-checkbox-wrapper">
+                                <span className={`status-badge ${isParentSettled ? 'settled' : 'unsettled'}`}>
+                                  {isParentSettled ? '返金済' : '未返金'}
+                                </span>
+                                <label className="switch">
+                                  <input
+                                    type="checkbox"
+                                    checked={isParentSettled}
+                                    onChange={() => handleToggleBulkStatus(parent.reserverName, parent.settlementStatus)}
+                                  />
+                                  <span className="slider"></span>
+                                </label>
+                              </div>
+                            );
+                          })()}
                         </div>
                       </div>
 
@@ -1823,6 +2149,9 @@ export default function Home() {
                           <div style={{ padding: '0.5rem 0', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
                             {parent.reservations.map((r) => {
                               const isCancelled = r.status === 'cancelled';
+                              const isCounter = r.settlementStatus === '窓口精算';
+                              const isSettled = r.settlementStatus === '精算済' || r.settlementStatus === '返金済';
+
                               return (
                                 <div
                                   key={r.id}
@@ -1838,7 +2167,7 @@ export default function Home() {
                                       <div style={{ fontWeight: 500 }}>
                                         {isCancelled ? '（消）' : ''}{r.date.replace(/-/g, '/')} <span className="facility-badge" style={{ fontSize: '0.72rem' }}>{r.facilityName}</span>
                                       </div>
-                                      <div style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)', marginTop: '0.2' }}>
+                                      <div style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)', marginTop: '0.2rem' }}>
                                         {r.courtStartTime}〜{r.courtEndTime}
                                         {r.lightHours > 0 && ` | 照明${r.lightHours}時間 (${r.lightStartTime || ''}〜)`}
                                         {' | '}{r.feeType}
@@ -1851,10 +2180,25 @@ export default function Home() {
                                     </div>
                                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexShrink: 0 }}>
                                       <span style={{ fontWeight: 600 }}>{r.totalFee.toLocaleString()}円</span>
-                                      <label className="switch">
-                                        <input type="checkbox" checked={r.settlementStatus === '精算済'} onChange={() => handleToggleStatus(r.id, r.settlementStatus)} />
-                                        <span className="slider"></span>
-                                      </label>
+                                      {isCounter ? (
+                                        <span className="status-badge counter" style={{ fontSize: '0.72rem', padding: '2px 8px' }}>
+                                          窓口精算 (返金対象外)
+                                        </span>
+                                      ) : (
+                                        <div className="settlement-checkbox-wrapper">
+                                          <span style={{ fontSize: '0.75rem', color: isSettled ? 'var(--color-success)' : 'var(--color-accent)' }}>
+                                            {isSettled ? '返金済' : '未返金'}
+                                          </span>
+                                          <label className="switch">
+                                            <input
+                                              type="checkbox"
+                                              checked={isSettled}
+                                              onChange={() => handleToggleStatus(r.id, r.settlementStatus)}
+                                            />
+                                            <span className="slider"></span>
+                                          </label>
+                                        </div>
+                                      )}
                                     </div>
                                   </div>
                                 </div>

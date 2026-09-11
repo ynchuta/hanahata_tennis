@@ -69,7 +69,7 @@ interface KVReservation {
   lh: number;  // lightHours
   ft: '大人' | '子供'; // feeType
   m: string;   // memo
-  s: '未精算' | '精算済'; // settlementStatus
+  s: SettlementStatus; // settlementStatus
   cs?: 'active' | 'cancelled'; // cancelStatus (未設定時は active)
   ca: string;  // createdAt
   lst?: string; // lightStartTime (HH:MM)
@@ -610,8 +610,9 @@ export async function getReservations(): Promise<Reservation[]> {
 }
 
 export async function addReservation(
-  reservation: Omit<Reservation, 'id' | 'createdAt' | 'courtFee' | 'lightFee' | 'totalFee' | 'facilityName'> & {
+  reservation: Omit<Reservation, 'id' | 'createdAt' | 'courtFee' | 'lightFee' | 'totalFee' | 'facilityName' | 'settlementStatus'> & {
     facilityId: string;
+    settlementStatus?: SettlementStatus;
   }
 ): Promise<Reservation> {
   const newId = crypto.randomUUID();
@@ -627,7 +628,7 @@ export async function addReservation(
     lh: reservation.lightHours,
     ft: reservation.feeType,
     m: reservation.memo,
-    s: reservation.settlementStatus,
+    s: reservation.settlementStatus || '未返金',
     cs: reservation.status || 'active',
     ca: createdAt,
     lst: reservation.lightStartTime,
@@ -705,7 +706,7 @@ export async function addReservation(
     lightFee,
     totalFee,
     memo: reservation.memo,
-    settlementStatus: reservation.settlementStatus,
+    settlementStatus: reservation.settlementStatus || '未返金',
     status: reservation.status || 'active',
     createdAt,
   };
@@ -1146,7 +1147,7 @@ export async function updateReservationsStatusByReserverMonth(
     const list = readMockData<KVReservation>(mockRecordsPath);
     let count = 0;
     for (const r of list) {
-      if (r.rn === reserverName && r.d.startsWith(month) && (r.cs || 'active') !== 'cancelled') {
+      if (r.rn === reserverName && r.d.startsWith(month) && (r.cs || 'active') !== 'cancelled' && r.s !== '窓口精算') {
         if (r.s !== status) {
           r.s = status;
           count++;
@@ -1179,7 +1180,7 @@ export async function updateReservationsStatusByReserverMonth(
       const rCancel = row[14] || 'active';
       const rSettlement = row[12];
 
-      if (rReserver === reserverName && rDate.startsWith(month) && rCancel !== 'cancelled') {
+      if (rReserver === reserverName && rDate.startsWith(month) && rCancel !== 'cancelled' && rSettlement !== '窓口精算') {
         if (rSettlement !== status) {
           batchUpdates.push({
             range: `records!M${i + 1}`,
