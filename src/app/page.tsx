@@ -528,9 +528,7 @@ export default function Home() {
       if (res.ok) {
         const updated = await res.json();
         setReservations((prev) => prev.map((r) => r.id === id ? updated : r));
-        if (selectedReservationAction && selectedReservationAction.id === id) {
-          setSelectedReservationAction(updated);
-        }
+        setSelectedReservationAction(null); // ステータス変更後にポップアップを閉じる
         await fetchLedgerRecords(); // 会計データを再取得
         showToast('ステータスを更新しました！');
       } else {
@@ -744,26 +742,26 @@ export default function Home() {
   // 時間差分から照明時間を計算するヘルパー（1時間単位）
   const calculateLightHours = (courtStart: string, courtEnd: string, lightStart: string | undefined): number => {
     if (!lightStart || !courtStart || !courtEnd) return 0;
-    
+
     const parseToMin = (timeStr: string) => {
       const [h, m] = timeStr.split(':').map(Number);
       return h * 60 + m;
     };
-    
+
     const cStart = parseToMin(courtStart);
     let cEnd = parseToMin(courtEnd);
     let lStart = parseToMin(lightStart);
-    
+
     // 日をまたぐコート時間の調整
     if (cEnd < cStart) cEnd += 24 * 60;
-    
+
     // 照明開始時間がコート開始より前なら、コート開始時間から点灯とみなす
     // 照明開始時間がコート終了より後なら、点灯なし
     if (lStart < cStart) {
       lStart = cStart;
     }
     if (lStart >= cEnd) return 0;
-    
+
     const diffMin = cEnd - lStart;
     return Math.max(0, Math.ceil(diffMin / 60)); // 1時間単位に切り上げ
   };
@@ -899,7 +897,7 @@ export default function Home() {
             <h1 className="app-title">Tennis Nighter</h1>
             <p className="app-subtitle">テニス部ナイター費精算管理システム</p>
           </header>
-          
+
           <form onSubmit={handleLogin}>
             <h3 style={{ marginBottom: '1.25rem', fontSize: '1.1rem', textAlign: 'center', color: 'var(--color-secondary)' }}>
               ログイン
@@ -1160,7 +1158,7 @@ export default function Home() {
                   >
                     <option value="未返金">立替払い（未返金 - 保護者への返金待ち）</option>
                     <option value="返金済">立替払い（返金済 - 返金完了）</option>
-                    <option value="窓口精算">窓口精算（返金対象外 - 窓口で直接支払）</option>
+                    <option value="窓口精算">窓口精算（窓口で直接支払）</option>
                   </select>
                   <p className="help-text">
                     {formData.settlementStatus === '窓口精算'
@@ -1322,7 +1320,7 @@ export default function Home() {
                           </div>
                           <div>
                             {isCounter ? (
-                              <span className="status-badge counter">窓口精算 (返金対象外)</span>
+                              <span className="status-badge counter">窓口精算</span>
                             ) : isSettled ? (
                               <span className="status-badge settled">返金済</span>
                             ) : (
@@ -1536,7 +1534,7 @@ export default function Home() {
                     </button>
                   </div>
                   <p style={{ fontSize: '0.72rem', color: 'var(--color-text-muted)', marginTop: '0.35rem', marginBottom: 0 }}>
-                    ※ 窓口精算は保護者への返金集計（月末レポート）から除外されます
+                    ※ 窓口精算は保護者への返金集計から除外されます
                   </p>
                 </div>
 
@@ -1612,8 +1610,8 @@ export default function Home() {
         const displayedLedgerRecords = showAllLedgerMonths
           ? [...ledgerRecords].sort((a, b) => b.date.localeCompare(a.date) || b.createdAt.localeCompare(a.createdAt))
           : [...ledgerRecords]
-              .filter((r) => r.date.startsWith(ledgerMonth))
-              .sort((a, b) => b.date.localeCompare(a.date) || b.createdAt.localeCompare(a.createdAt));
+            .filter((r) => r.date.startsWith(ledgerMonth))
+            .sort((a, b) => b.date.localeCompare(a.date) || b.createdAt.localeCompare(a.createdAt));
 
         const monthIncome = displayedLedgerRecords.reduce((sum, r) => sum + r.income, 0);
         const monthExpense = displayedLedgerRecords.reduce((sum, r) => sum + r.expense, 0);
@@ -2066,7 +2064,7 @@ export default function Home() {
                       style={{ padding: '0.65rem 1rem', marginTop: '0.25rem' }}
                       onClick={() => setSelectedLedgerAction(null)}
                     >
-                      キャンセル
+                      予約取消
                     </button>
                   </div>
                 </div>
@@ -2182,7 +2180,7 @@ export default function Home() {
                                       <span style={{ fontWeight: 600 }}>{r.totalFee.toLocaleString()}円</span>
                                       {isCounter ? (
                                         <span className="status-badge counter" style={{ fontSize: '0.72rem', padding: '2px 8px' }}>
-                                          窓口精算 (返金対象外)
+                                          窓口精算
                                         </span>
                                       ) : (
                                         <div className="settlement-checkbox-wrapper">
@@ -2240,62 +2238,62 @@ export default function Home() {
             )}
 
             {isFacilityFormOpen && (
-            <form onSubmit={handleSubmitFacility} style={{ marginBottom: '2rem', borderBottom: '1px solid var(--border-color)', paddingBottom: '2rem' }}>
-              <h4 style={{ marginBottom: '1rem', fontSize: '0.95rem' }}>
-                {isEditingFacility ? 'コート情報を編集' : '新規コートを追加'}
-              </h4>
+              <form onSubmit={handleSubmitFacility} style={{ marginBottom: '2rem', borderBottom: '1px solid var(--border-color)', paddingBottom: '2rem' }}>
+                <h4 style={{ marginBottom: '1rem', fontSize: '0.95rem' }}>
+                  {isEditingFacility ? 'コート情報を編集' : '新規コートを追加'}
+                </h4>
 
-              <div className="form-group">
-                <label className="form-label">コート名 (施設名)</label>
-                <input type="text" className="form-input" required placeholder="例: 桧原運動公園" value={facilityForm.name} onChange={(e) => setFacilityForm((prev) => ({ ...prev, name: e.target.value }))} />
-              </div>
-
-              <div className="form-row">
                 <div className="form-group">
-                  <label className="form-label">大人料金 (1時間)</label>
-                  <input type="number" className="form-input" required min="0" value={facilityForm.adultRatePerHour} onChange={(e) => setFacilityForm((prev) => ({ ...prev, adultRatePerHour: Number(e.target.value) }))} />
+                  <label className="form-label">コート名 (施設名)</label>
+                  <input type="text" className="form-input" required placeholder="例: 桧原運動公園" value={facilityForm.name} onChange={(e) => setFacilityForm((prev) => ({ ...prev, name: e.target.value }))} />
                 </div>
-                <div className="form-group">
-                  <label className="form-label">子供料金 (1時間)</label>
-                  <input type="number" className="form-input" required min="0" disabled={!facilityForm.allowChildRate} value={facilityForm.allowChildRate ? facilityForm.childRatePerHour : facilityForm.adultRatePerHour} onChange={(e) => setFacilityForm((prev) => ({ ...prev, childRatePerHour: Number(e.target.value) }))} />
-                </div>
-              </div>
 
-              <div className="form-row">
-                <div className="form-group">
-                  <label className="form-label">照明料金 (1時間)</label>
-                  <input type="number" className="form-input" required min="0" value={facilityForm.lightRatePerHour} onChange={(e) => setFacilityForm((prev) => ({ ...prev, lightRatePerHour: Number(e.target.value) }))} />
+                <div className="form-row">
+                  <div className="form-group">
+                    <label className="form-label">大人料金 (1時間)</label>
+                    <input type="number" className="form-input" required min="0" value={facilityForm.adultRatePerHour} onChange={(e) => setFacilityForm((prev) => ({ ...prev, adultRatePerHour: Number(e.target.value) }))} />
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">子供料金 (1時間)</label>
+                    <input type="number" className="form-input" required min="0" disabled={!facilityForm.allowChildRate} value={facilityForm.allowChildRate ? facilityForm.childRatePerHour : facilityForm.adultRatePerHour} onChange={(e) => setFacilityForm((prev) => ({ ...prev, childRatePerHour: Number(e.target.value) }))} />
+                  </div>
                 </div>
-                <div className="form-group">
-                  <label className="form-label">デフォルト照明利用開始時間</label>
-                  <input type="time" className="form-input" value={facilityForm.defaultLightStartTime} onChange={(e) => setFacilityForm((prev) => ({ ...prev, defaultLightStartTime: e.target.value }))} />
+
+                <div className="form-row">
+                  <div className="form-group">
+                    <label className="form-label">照明料金 (1時間)</label>
+                    <input type="number" className="form-input" required min="0" value={facilityForm.lightRatePerHour} onChange={(e) => setFacilityForm((prev) => ({ ...prev, lightRatePerHour: Number(e.target.value) }))} />
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">デフォルト照明利用開始時間</label>
+                    <input type="time" className="form-input" value={facilityForm.defaultLightStartTime} onChange={(e) => setFacilityForm((prev) => ({ ...prev, defaultLightStartTime: e.target.value }))} />
+                  </div>
                 </div>
-              </div>
 
-              <div className="form-group">
-                <label className="form-label" style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', marginTop: '0.5rem' }}>
-                  <input
-                    type="checkbox"
-                    checked={facilityForm.allowChildRate}
-                    onChange={(e) => setFacilityForm((prev) => ({
-                      ...prev,
-                      allowChildRate: e.target.checked,
-                      childRatePerHour: e.target.checked ? prev.childRatePerHour : prev.adultRatePerHour,
-                    }))}
-                  />
-                  子供料金の選択を許可する
-                </label>
-              </div>
+                <div className="form-group">
+                  <label className="form-label" style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', marginTop: '0.5rem' }}>
+                    <input
+                      type="checkbox"
+                      checked={facilityForm.allowChildRate}
+                      onChange={(e) => setFacilityForm((prev) => ({
+                        ...prev,
+                        allowChildRate: e.target.checked,
+                        childRatePerHour: e.target.checked ? prev.childRatePerHour : prev.adultRatePerHour,
+                      }))}
+                    />
+                    子供料金の選択を許可する
+                  </label>
+                </div>
 
-              <div className="form-row" style={{ marginTop: '1rem' }}>
-                <button type="button" className="btn btn-secondary" onClick={() => {
+                <div className="form-row" style={{ marginTop: '1rem' }}>
+                  <button type="button" className="btn btn-secondary" onClick={() => {
                     setIsEditingFacility(false);
                     setIsFacilityFormOpen(false);
                     setFacilityForm({ id: '', name: '', adultRatePerHour: 1000, childRatePerHour: 500, lightRatePerHour: 300, allowChildRate: true, defaultLightStartTime: '' });
                   }}>閉じる</button>
-                <button type="submit" className="btn btn-primary">{isEditingFacility ? '更新する' : '追加する'}</button>
-              </div>
-            </form>
+                  <button type="submit" className="btn btn-primary">{isEditingFacility ? '更新する' : '追加する'}</button>
+                </div>
+              </form>
             )}
 
             {/* コート一覧 */}
