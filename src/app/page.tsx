@@ -1156,9 +1156,9 @@ export default function Home() {
                     value={formData.settlementStatus}
                     onChange={(e) => setFormData((prev) => ({ ...prev, settlementStatus: e.target.value as SettlementStatus }))}
                   >
-                    <option value="未返金">立替払い（未返金 - 保護者への返金待ち）</option>
-                    <option value="返金済">立替払い（返金済 - 返金完了）</option>
-                    <option value="窓口精算">窓口精算（窓口で直接支払）</option>
+                    <option value="未返金">立替払い（未返金）</option>
+                    <option value="返金済">立替払い（返金済）</option>
+                    <option value="窓口精算">窓口精算</option>
                   </select>
                   <p className="help-text">
                     {formData.settlementStatus === '窓口精算'
