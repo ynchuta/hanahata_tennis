@@ -1275,9 +1275,6 @@ export default function Home() {
               </p>
             ) : (
               <div>
-                <p style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', textAlign: 'center', marginBottom: '0.75rem' }}>
-                  ※ 予約をタップすると操作（返金状態・編集・キャンセル・削除）ができます
-                </p>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
                   {currentDayReservations.map((r) => {
                     const isCancelled = r.status === 'cancelled';
