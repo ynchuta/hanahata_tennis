@@ -101,11 +101,13 @@ export default function Home() {
 
   // 日没・薄明時刻用ステート
   const [sunsetSettings, setSunsetSettings] = useState<{
+    showOnCalendar: boolean;
     locationName: string;
     latitude: number;
     longitude: number;
     twilightType: 'sunset' | 'civil' | 'nautical' | 'astronomical';
   }>({
+    showOnCalendar: true,
     locationName: '福岡市南区桧原（テニスコート）',
     latitude: 33.54,
     longitude: 130.395,
@@ -113,12 +115,12 @@ export default function Home() {
   });
   const [sunsetDataMap, setSunsetDataMap] = useState<Record<string, string>>({});
   const [sunsetForm, setSunsetForm] = useState({
+    showOnCalendar: true,
     locationName: '福岡市南区桧原（テニスコート）',
     latitude: '33.54',
     longitude: '130.395',
     twilightType: 'civil' as 'sunset' | 'civil' | 'nautical' | 'astronomical',
   });
-  const [showSunset, setShowSunset] = useState(true);
 
   const showToast = useCallback((message: string, duration = 3000, loading = false) => {
     setToast({ message, show: true, loading });
@@ -210,6 +212,7 @@ export default function Home() {
         const data = await res.json();
         setSunsetSettings(data);
         setSunsetForm({
+          showOnCalendar: data.showOnCalendar ?? true,
           locationName: data.locationName || '福岡市南区桧原（テニスコート）',
           latitude: String(data.latitude ?? 33.54),
           longitude: String(data.longitude ?? 130.395),
@@ -1083,26 +1086,11 @@ export default function Home() {
         <section>
           <div className="card">
             <div className="calendar">
-              <div className="calendar-header" style={{ position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div className="calendar-header">
                 <button className="calendar-nav-btn" onClick={() => changeMonth(-1)}>&lt; 前月</button>
-
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', position: 'absolute', left: '50%', transform: 'translateX(-50%)', whiteSpace: 'nowrap' }}>
-                  <h2 className="calendar-month-title" style={{ margin: 0 }}>
-                    {currentDate.getFullYear()}年 {currentDate.getMonth() + 1}月
-                  </h2>
-                  <div className="settlement-checkbox-wrapper" style={{ margin: 0, gap: '0.35rem' }} title="日没時刻の表示ON/OFF">
-                    <span style={{ fontSize: '0.9rem', lineHeight: 1 }}>🌅</span>
-                    <label className="switch">
-                      <input
-                        type="checkbox"
-                        checked={showSunset}
-                        onChange={(e) => setShowSunset(e.target.checked)}
-                      />
-                      <span className="slider"></span>
-                    </label>
-                  </div>
-                </div>
-
+                <h2 className="calendar-month-title">
+                  {currentDate.getFullYear()}年 {currentDate.getMonth() + 1}月
+                </h2>
                 <button className="calendar-nav-btn" onClick={() => changeMonth(1)}>翌月 &gt;</button>
               </div>
 
@@ -1127,7 +1115,7 @@ export default function Home() {
                       <span className="day-number" style={{ textAlign: 'center', fontSize: '0.85rem' }}>
                         {day.getDate()}
                       </span>
-                      {showSunset && (dayReservations.some((r) => r.status !== 'cancelled') || isSelected) && sunsetDataMap[dayStr] && (
+                      {sunsetSettings.showOnCalendar && (dayReservations.some((r) => r.status !== 'cancelled') || isSelected) && sunsetDataMap[dayStr] && (
                         <div
                           title={`日没・薄明時刻 (${sunsetSettings.locationName})`}
                           style={{
@@ -1148,7 +1136,7 @@ export default function Home() {
                         </div>
                       )}
                       {dayReservations.length > 0 && (
-                        showSunset ? (
+                        sunsetSettings.showOnCalendar ? (
                           /* 日没表示ON時: 縦幅変化を防ぐ簡略表現（名前ではなくステータスカラーのドット●で表示） */
                           <div style={{ display: 'flex', gap: '3px', justifyContent: 'center', alignItems: 'center', marginTop: '4px', flexWrap: 'wrap' }}>
                             {dayReservations.map((r) => {
@@ -2569,7 +2557,7 @@ export default function Home() {
           <div className="card">
             <h3 style={{ marginBottom: '0.5rem', color: 'var(--color-secondary)' }}>🌅 日没・薄明時刻表示設定</h3>
             <p style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)', marginBottom: '1.25rem' }}>
-              カレンダー上に表示する日没・薄明時刻の基準位置と表示基準を設定します。設定はGoogleスプレッドシートに保存されます。
+              カレンダー上に表示する日没・薄明時刻のON/OFFや基準位置、表示基準を設定します。設定はすべてGoogleスプレッドシートに自動保存されます。
             </p>
 
             <form onSubmit={async (e) => {
@@ -2586,6 +2574,7 @@ export default function Home() {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify({
+                    showOnCalendar: sunsetForm.showOnCalendar,
                     locationName: sunsetForm.locationName,
                     latitude: lat,
                     longitude: lng,
@@ -2605,6 +2594,30 @@ export default function Home() {
                 showToast('通信エラーが発生しました');
               }
             }}>
+              {/* 日没表示ON/OFFスイッチ */}
+              <div className="form-group" style={{ background: 'rgba(255, 255, 255, 0.03)', padding: '1rem', borderRadius: '0.75rem', border: '1px solid rgba(255, 255, 255, 0.08)', marginBottom: '1.25rem' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '1rem' }}>
+                  <div>
+                    <label className="form-label" style={{ marginBottom: '0.25rem', fontWeight: 600, color: 'var(--color-text-main)' }}>
+                      カレンダー画面に日没・薄明時刻を表示する
+                    </label>
+                    <p style={{ fontSize: '0.78rem', color: 'var(--color-text-muted)', margin: 0, lineHeight: 1.4 }}>
+                      ※ スイッチをONにすると、カレンダー上に「🌅 18:24」形式で表示され、予約データは●（ドット）で簡略表示してセルの高さのブレを防ぎます。OFFにすると従来の名前一覧表示になります。
+                    </p>
+                  </div>
+                  <div className="settlement-checkbox-wrapper" style={{ margin: 0, flexShrink: 0 }}>
+                    <label className="switch">
+                      <input
+                        type="checkbox"
+                        checked={sunsetForm.showOnCalendar}
+                        onChange={(e) => setSunsetForm((prev) => ({ ...prev, showOnCalendar: e.target.checked }))}
+                      />
+                      <span className="slider"></span>
+                    </label>
+                  </div>
+                </div>
+              </div>
+
               <div className="form-group">
                 <label className="form-label">基準場所名称</label>
                 <input

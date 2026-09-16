@@ -1644,6 +1644,7 @@ export async function deleteCategory(idOrName: string): Promise<boolean> {
 const mockSunsetSettingsPath = path.join(process.cwd(), 'mock-data', 'sunset_settings.json');
 
 export interface SunsetSettings {
+  showOnCalendar: boolean;
   locationName: string;
   latitude: number;
   longitude: number;
@@ -1651,6 +1652,7 @@ export interface SunsetSettings {
 }
 
 export const DEFAULT_SUNSET_SETTINGS: SunsetSettings = {
+  showOnCalendar: true,
   locationName: '福岡市南区桧原（テニスコート）',
   latitude: 33.54,
   longitude: 130.395,
@@ -1681,6 +1683,7 @@ async function ensureSettingsSheet(sheets: any) {
       });
       const initialValues = [
         ['key', 'value'],
+        ['sunset_show_on_calendar', String(DEFAULT_SUNSET_SETTINGS.showOnCalendar)],
         ['sunset_location_name', DEFAULT_SUNSET_SETTINGS.locationName],
         ['sunset_latitude', String(DEFAULT_SUNSET_SETTINGS.latitude)],
         ['sunset_longitude', String(DEFAULT_SUNSET_SETTINGS.longitude)],
@@ -1732,6 +1735,7 @@ export async function getSunsetSettings(): Promise<SunsetSettings> {
     });
 
     return {
+      showOnCalendar: settingsMap['sunset_show_on_calendar'] !== undefined ? settingsMap['sunset_show_on_calendar'] === 'true' : DEFAULT_SUNSET_SETTINGS.showOnCalendar,
       locationName: settingsMap['sunset_location_name'] || DEFAULT_SUNSET_SETTINGS.locationName,
       latitude: settingsMap['sunset_latitude'] ? parseFloat(settingsMap['sunset_latitude']) : DEFAULT_SUNSET_SETTINGS.latitude,
       longitude: settingsMap['sunset_longitude'] ? parseFloat(settingsMap['sunset_longitude']) : DEFAULT_SUNSET_SETTINGS.longitude,
@@ -1753,6 +1757,7 @@ export async function getSunsetSettings(): Promise<SunsetSettings> {
 export async function saveSunsetSettings(settings: Partial<SunsetSettings>): Promise<SunsetSettings> {
   const current = await getSunsetSettings();
   const updated: SunsetSettings = {
+    showOnCalendar: settings.showOnCalendar !== undefined ? Boolean(settings.showOnCalendar) : current.showOnCalendar,
     locationName: settings.locationName !== undefined ? settings.locationName : current.locationName,
     latitude: settings.latitude !== undefined ? Number(settings.latitude) : current.latitude,
     longitude: settings.longitude !== undefined ? Number(settings.longitude) : current.longitude,
@@ -1776,6 +1781,7 @@ export async function saveSunsetSettings(settings: Partial<SunsetSettings>): Pro
 
     const values = [
       ['key', 'value'],
+      ['sunset_show_on_calendar', String(updated.showOnCalendar)],
       ['sunset_location_name', updated.locationName],
       ['sunset_latitude', String(updated.latitude)],
       ['sunset_longitude', String(updated.longitude)],
