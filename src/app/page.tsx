@@ -1111,24 +1111,23 @@ export default function Home() {
                       key={idx}
                       onClick={() => setSelectedDateStr(dayStr)}
                       className={`calendar-day ${isCurrentMonth ? '' : 'outside'} ${isSelected ? 'selected' : ''} ${isToday ? 'today' : ''}`}
-                      style={{ display: 'flex', flexDirection: 'column', minHeight: '62px' }}
+                      style={{ display: 'flex', flexDirection: 'column', minHeight: '64px', position: 'relative' }}
                     >
                       {/* 1. 日付 */}
                       <span className="day-number" style={{ textAlign: 'center', fontSize: '0.85rem' }}>
                         {day.getDate()}
                       </span>
 
-                      {/* 2. 予約情報（ドット表記 / フルネーム表記） */}
+                      {/* 2. 予約情報（日付の直下に固定配置） */}
                       {dayReservations.length > 0 && (
                         sunsetSettings.showOnCalendar ? (
-                          /* 日没表示ON時: セル高さを壊さないコンパクトな●ドット表示 */
+                          /* 日没表示ON時: 日付の直下に固定配置（下に張り付かないよう marginTop: 3px） */
                           <div style={{
                             display: 'flex',
                             gap: '2px',
                             justifyContent: 'center',
                             alignItems: 'center',
-                            marginTop: '2px',
-                            marginBottom: '2px',
+                            marginTop: '3px',
                             flexWrap: 'wrap',
                             maxWidth: '100%',
                             maxHeight: '1.5em',
@@ -1187,26 +1186,27 @@ export default function Home() {
                         )
                       )}
 
-                      {/* 3. 日没時間（最下部に統一配置） */}
-                      {sunsetSettings.showOnCalendar && (dayReservations.some((r) => r.status !== 'cancelled') || isSelected) && sunsetDataMap[dayStr] && (
-                        <div
-                          title={`日没・薄明時刻 (${sunsetSettings.locationName})`}
-                          style={{
-                            fontSize: '0.7rem',
-                            color: '#f59e0b',
-                            marginTop: 'auto',
-                            paddingTop: '2px',
-                            textAlign: 'center',
-                            fontWeight: 600,
-                            whiteSpace: 'nowrap',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            gap: '2px',
-                          }}
-                        >
-                          <span>🌅</span>
-                          <span>{sunsetDataMap[dayStr]}</span>
+                      {/* 3. 日没時間エリア（表示ON時は領域を固定確保し、ドットが上に押し上げられる位置ズレを防ぐ） */}
+                      {sunsetSettings.showOnCalendar && (
+                        <div style={{ marginTop: 'auto', minHeight: '1.2rem', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                          {(dayReservations.some((r) => r.status !== 'cancelled') || isSelected) && sunsetDataMap[dayStr] && (
+                            <div
+                              title={`日没・薄明時刻 (${sunsetSettings.locationName})`}
+                              style={{
+                                fontSize: '0.7rem',
+                                color: '#f59e0b',
+                                fontWeight: 600,
+                                whiteSpace: 'nowrap',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                gap: '2px',
+                              }}
+                            >
+                              <span>🌅</span>
+                              <span>{sunsetDataMap[dayStr]}</span>
+                            </div>
+                          )}
                         </div>
                       )}
                     </div>
@@ -2647,7 +2647,7 @@ export default function Home() {
                                 twilightType: sunsetForm.twilightType,
                               }),
                             });
-                            showToast(nextVal ? '日没時刻の表示をONにしました（即時反映）' : '日没時刻の表示をOFFにしました（即時反映）');
+                            showToast(nextVal ? '日没時刻の表示をONにしました' : '日没時刻の表示をOFFにしました');
                           } catch (err) {
                             console.error(err);
                           }
