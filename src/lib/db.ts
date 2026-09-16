@@ -1701,13 +1701,26 @@ async function ensureSettingsSheet(sheets: any) {
   }
 }
 
+function parseBoolean(val: any, defaultValue: boolean): boolean {
+  if (val === undefined || val === null || val === '') return defaultValue;
+  if (typeof val === 'boolean') return val;
+  const str = String(val).trim().toLowerCase();
+  if (str === 'true' || str === '1' || str === 'yes') return true;
+  if (str === 'false' || str === '0' || str === 'no') return false;
+  return defaultValue;
+}
+
 export async function getSunsetSettings(): Promise<SunsetSettings> {
   if (getUseMock()) {
     try {
       if (fs.existsSync(mockSunsetSettingsPath)) {
         const raw = fs.readFileSync(mockSunsetSettingsPath, 'utf-8');
         const parsed = JSON.parse(raw);
-        return { ...DEFAULT_SUNSET_SETTINGS, ...parsed };
+        return {
+          ...DEFAULT_SUNSET_SETTINGS,
+          ...parsed,
+          showOnCalendar: parseBoolean(parsed.showOnCalendar, DEFAULT_SUNSET_SETTINGS.showOnCalendar),
+        };
       }
     } catch (e) {
       console.error('Error reading mock sunset settings:', e);
@@ -1735,7 +1748,7 @@ export async function getSunsetSettings(): Promise<SunsetSettings> {
     });
 
     return {
-      showOnCalendar: settingsMap['sunset_show_on_calendar'] !== undefined ? settingsMap['sunset_show_on_calendar'] === 'true' : DEFAULT_SUNSET_SETTINGS.showOnCalendar,
+      showOnCalendar: parseBoolean(settingsMap['sunset_show_on_calendar'], DEFAULT_SUNSET_SETTINGS.showOnCalendar),
       locationName: settingsMap['sunset_location_name'] || DEFAULT_SUNSET_SETTINGS.locationName,
       latitude: settingsMap['sunset_latitude'] ? parseFloat(settingsMap['sunset_latitude']) : DEFAULT_SUNSET_SETTINGS.latitude,
       longitude: settingsMap['sunset_longitude'] ? parseFloat(settingsMap['sunset_longitude']) : DEFAULT_SUNSET_SETTINGS.longitude,
@@ -1747,7 +1760,11 @@ export async function getSunsetSettings(): Promise<SunsetSettings> {
       if (fs.existsSync(mockSunsetSettingsPath)) {
         const raw = fs.readFileSync(mockSunsetSettingsPath, 'utf-8');
         const parsed = JSON.parse(raw);
-        return { ...DEFAULT_SUNSET_SETTINGS, ...parsed };
+        return {
+          ...DEFAULT_SUNSET_SETTINGS,
+          ...parsed,
+          showOnCalendar: parseBoolean(parsed.showOnCalendar, DEFAULT_SUNSET_SETTINGS.showOnCalendar),
+        };
       }
     } catch (e) {}
     return DEFAULT_SUNSET_SETTINGS;
