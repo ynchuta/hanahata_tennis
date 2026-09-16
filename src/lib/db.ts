@@ -1641,3 +1641,162 @@ export async function deleteCategory(idOrName: string): Promise<boolean> {
   }
 }
 
+const mockSunsetSettingsPath = path.join(process.cwd(), 'mock-data', 'sunset_settings.json');
+
+export interface SunsetSettings {
+  locationName: string;
+  latitude: number;
+  longitude: number;
+  twilightType: 'sunset' | 'civil' | 'nautical' | 'astronomical';
+}
+
+export const DEFAULT_SUNSET_SETTINGS: SunsetSettings = {
+  locationName: '福岡市南区桧原（テニスコート）',
+  latitude: 33.54,
+  longitude: 130.395,
+  twilightType: 'civil',
+};
+
+async function ensureSettingsSheet(sheets: any) {
+  try {
+    const spreadsheet = await sheets.spreadsheets.get({ spreadsheetId: SPREADSHEET_ID });
+    const sheetExists = spreadsheet.data.sheets?.some(
+      (s: any) => s.properties?.title === 'settings'
+    );
+
+    if (!sheetExists) {
+      await sheets.spreadsheets.batchUpdate({
+        spreadsheetId: SPREADSHEET_ID,
+        requestBody: {
+          requests: [
+            {
+              addSheet: {
+                properties: {
+                  title: 'settings',
+                },
+              },
+            },
+          ],
+        },
+      });
+      const initialValues = [
+        ['key', 'value'],
+        ['sunset_location_name', DEFAULT_SUNSET_SETTINGS.locationName],
+        ['sunset_latitude', String(DEFAULT_SUNSET_SETTINGS.latitude)],
+        ['sunset_longitude', String(DEFAULT_SUNSET_SETTINGS.longitude)],
+        ['sunset_twilight_type', DEFAULT_SUNSET_SETTINGS.twilightType],
+      ];
+      await sheets.spreadsheets.values.update({
+        spreadsheetId: SPREADSHEET_ID,
+        range: 'settings!A1:B',
+        valueInputOption: 'USER_ENTERED',
+        requestBody: { values: initialValues },
+      });
+    }
+  } catch (error) {
+    console.error('Error ensuring settings sheet:', error);
+  }
+}
+
+export async function getSunsetSettings(): Promise<SunsetSettings> {
+  if (getUseMock()) {
+    try {
+      if (fs.existsSync(mockSunsetSettingsPath)) {
+        const raw = fs.readFileSync(mockSunsetSettingsPath, 'utf-8');
+        const parsed = JSON.parse(raw);
+        return { ...DEFAULT_SUNSET_SETTINGS, ...parsed };
+      }
+    } catch (e) {
+      console.error('Error reading mock sunset settings:', e);
+    }
+    return DEFAULT_SUNSET_SETTINGS;
+  }
+
+  try {
+    const sheets = getSheetsClient();
+    await ensureSettingsSheet(sheets);
+
+    const response = await sheets.spreadsheets.values.get({
+      spreadsheetId: SPREADSHEET_ID,
+      range: 'settings!A2:B',
+    });
+
+    const rows = response.data.values;
+    if (!rows || rows.length === 0) {
+      return DEFAULT_SUNSET_SETTINGS;
+    }
+
+    const settingsMap: Record<string, string> = {};
+    rows.forEach((row: any) => {
+      if (row[0]) settingsMap[row[0]] = row[1] ?? '';
+    });
+
+    return {
+      locationName: settingsMap['sunset_location_name'] || DEFAULT_SUNSET_SETTINGS.locationName,
+      latitude: settingsMap['sunset_latitude'] ? parseFloat(settingsMap['sunset_latitude']) : DEFAULT_SUNSET_SETTINGS.latitude,
+      longitude: settingsMap['sunset_longitude'] ? parseFloat(settingsMap['sunset_longitude']) : DEFAULT_SUNSET_SETTINGS.longitude,
+      twilightType: (settingsMap['sunset_twilight_type'] as any) || DEFAULT_SUNSET_SETTINGS.twilightType,
+    };
+  } catch (error) {
+    console.error('Google Sheets API Error (getSunsetSettings), falling back to mock:', error);
+    try {
+      if (fs.existsSync(mockSunsetSettingsPath)) {
+        const raw = fs.readFileSync(mockSunsetSettingsPath, 'utf-8');
+        const parsed = JSON.parse(raw);
+        return { ...DEFAULT_SUNSET_SETTINGS, ...parsed };
+      }
+    } catch (e) {}
+    return DEFAULT_SUNSET_SETTINGS;
+  }
+}
+
+export async function saveSunsetSettings(settings: Partial<SunsetSettings>): Promise<SunsetSettings> {
+  const current = await getSunsetSettings();
+  const updated: SunsetSettings = {
+    locationName: settings.locationName !== undefined ? settings.locationName : current.locationName,
+    latitude: settings.latitude !== undefined ? Number(settings.latitude) : current.latitude,
+    longitude: settings.longitude !== undefined ? Number(settings.longitude) : current.longitude,
+    twilightType: settings.twilightType !== undefined ? settings.twilightType : current.twilightType,
+  };
+
+  if (getUseMock()) {
+    try {
+      const dir = path.dirname(mockSunsetSettingsPath);
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(mockSunsetSettingsPath, JSON.stringify(updated, null, 2), 'utf-8');
+    } catch (e) {
+      console.error('Error writing mock sunset settings:', e);
+    }
+    return updated;
+  }
+
+  try {
+    const sheets = getSheetsClient();
+    await ensureSettingsSheet(sheets);
+
+    const values = [
+      ['key', 'value'],
+      ['sunset_location_name', updated.locationName],
+      ['sunset_latitude', String(updated.latitude)],
+      ['sunset_longitude', String(updated.longitude)],
+      ['sunset_twilight_type', updated.twilightType],
+    ];
+
+    await sheets.spreadsheets.values.update({
+      spreadsheetId: SPREADSHEET_ID,
+      range: 'settings!A1:B',
+      valueInputOption: 'USER_ENTERED',
+      requestBody: { values },
+    });
+
+    return updated;
+  } catch (error) {
+    console.error('Google Sheets API Error (saveSunsetSettings), falling back to mock:', error);
+    try {
+      const dir = path.dirname(mockSunsetSettingsPath);
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(mockSunsetSettingsPath, JSON.stringify(updated, null, 2), 'utf-8');
+    } catch (e) {}
+    return updated;
+  }
+}

@@ -99,6 +99,26 @@ export default function Home() {
     show: false,
   });
 
+  // 日没・薄明時刻用ステート
+  const [sunsetSettings, setSunsetSettings] = useState<{
+    locationName: string;
+    latitude: number;
+    longitude: number;
+    twilightType: 'sunset' | 'civil' | 'nautical' | 'astronomical';
+  }>({
+    locationName: '福岡市南区桧原（テニスコート）',
+    latitude: 33.54,
+    longitude: 130.395,
+    twilightType: 'civil',
+  });
+  const [sunsetDataMap, setSunsetDataMap] = useState<Record<string, string>>({});
+  const [sunsetForm, setSunsetForm] = useState({
+    locationName: '福岡市南区桧原（テニスコート）',
+    latitude: '33.54',
+    longitude: '130.395',
+    twilightType: 'civil' as 'sunset' | 'civil' | 'nautical' | 'astronomical',
+  });
+
   const showToast = useCallback((message: string, duration = 3000, loading = false) => {
     setToast({ message, show: true, loading });
     if (!loading && duration > 0) {
@@ -182,6 +202,50 @@ export default function Home() {
     } catch (err) { console.error(err); }
   }, []);
 
+  const fetchSunsetSettings = useCallback(async () => {
+    try {
+      const res = await fetch('/api/sunset-settings');
+      if (res.ok) {
+        const data = await res.json();
+        setSunsetSettings(data);
+        setSunsetForm({
+          locationName: data.locationName || '福岡市南区桧原（テニスコート）',
+          latitude: String(data.latitude ?? 33.54),
+          longitude: String(data.longitude ?? 130.395),
+          twilightType: data.twilightType || 'civil',
+        });
+      }
+    } catch (e) {
+      console.error('Failed to fetch sunset settings:', e);
+    }
+  }, []);
+
+  const fetchSunsets = useCallback(async (targetDates: string[], settings: typeof sunsetSettings) => {
+    if (targetDates.length === 0) return;
+    try {
+      const datesQuery = targetDates.join(',');
+      const res = await fetch(
+        `/api/sunset?dates=${datesQuery}&lat=${settings.latitude}&lng=${settings.longitude}&twilightType=${settings.twilightType}`
+      );
+      if (res.ok) {
+        const json = await res.json();
+        if (json.data) {
+          setSunsetDataMap((prev) => {
+            const next = { ...prev };
+            Object.entries(json.data as Record<string, { selectedTime: string }>).forEach(([dateStr, val]) => {
+              if (val && val.selectedTime) {
+                next[dateStr] = val.selectedTime;
+              }
+            });
+            return next;
+          });
+        }
+      }
+    } catch (e) {
+      console.error('Failed to fetch sunset times:', e);
+    }
+  }, []);
+
   // セッション（LocalStorage）のチェック
   useEffect(() => {
     const auth = localStorage.getItem('nighter_auth');
@@ -203,9 +267,31 @@ export default function Home() {
         fetchReservations();
         fetchLedgerRecords();
         fetchCategories();
+        fetchSunsetSettings();
       });
     }
-  }, [isLoggedIn, fetchFacilities, fetchReservers, fetchReservations, fetchLedgerRecords, fetchCategories]);
+  }, [isLoggedIn, fetchFacilities, fetchReservers, fetchReservations, fetchLedgerRecords, fetchCategories, fetchSunsetSettings]);
+
+  // カレンダーの表示月や予約・選択日の変化に合わせて日没時刻を一括取得
+  useEffect(() => {
+    if (!isLoggedIn) return;
+    const days = getDaysInMonth(currentDate);
+    const dateStrs = days.map(toLocalDateStr);
+
+    const targetSet = new Set<string>();
+    if (selectedDateStr) targetSet.add(selectedDateStr);
+
+    reservations.forEach((r) => {
+      if (r.status !== 'cancelled' && dateStrs.includes(r.date)) {
+        targetSet.add(r.date);
+      }
+    });
+
+    const datesToFetch = Array.from(targetSet).filter((d) => !sunsetDataMap[d]);
+    if (datesToFetch.length > 0) {
+      fetchSunsets(datesToFetch, sunsetSettings);
+    }
+  }, [currentDate, reservations, selectedDateStr, isLoggedIn, sunsetSettings, sunsetDataMap, fetchSunsets]);
 
   // カレンダーの月（currentDate）と集計レポートの対象月（reportMonth）を連動させる
   useEffect(() => {
@@ -1025,6 +1111,26 @@ export default function Home() {
                       <span className="day-number" style={{ textAlign: 'center', fontSize: '0.85rem' }}>
                         {day.getDate()}
                       </span>
+                      {(dayReservations.some((r) => r.status !== 'cancelled') || isSelected) && sunsetDataMap[dayStr] && (
+                        <div
+                          title={`日没・薄明時刻 (${sunsetSettings.locationName})`}
+                          style={{
+                            fontSize: '0.72rem',
+                            color: '#f59e0b',
+                            marginTop: '2px',
+                            textAlign: 'center',
+                            fontWeight: 600,
+                            whiteSpace: 'nowrap',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            gap: '2px',
+                          }}
+                        >
+                          <span>🌅</span>
+                          <span>{sunsetDataMap[dayStr]}</span>
+                        </div>
+                      )}
                       {dayReservations.length > 0 && (
                         <div className="day-reserver-list">
                           {dayReservations.map((r) => {
@@ -2408,6 +2514,105 @@ export default function Home() {
                 ))}
               </div>
             </div>
+          </div>
+
+          {/* 日没・薄明時刻設定 */}
+          <div className="card">
+            <h3 style={{ marginBottom: '0.5rem', color: 'var(--color-secondary)' }}>🌅 日没・薄明時刻表示設定</h3>
+            <p style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)', marginBottom: '1.25rem' }}>
+              カレンダー上に表示する日没・薄明時刻の基準位置と表示基準を設定します。設定はGoogleスプレッドシートに保存されます。
+            </p>
+
+            <form onSubmit={async (e) => {
+              e.preventDefault();
+              showToast('日没設定を保存中...', 0, true);
+              try {
+                const lat = parseFloat(sunsetForm.latitude);
+                const lng = parseFloat(sunsetForm.longitude);
+                if (isNaN(lat) || isNaN(lng)) {
+                  showToast('緯度・経度は正しい数値で入力してください');
+                  return;
+                }
+                const res = await fetch('/api/sunset-settings', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    locationName: sunsetForm.locationName,
+                    latitude: lat,
+                    longitude: lng,
+                    twilightType: sunsetForm.twilightType,
+                  }),
+                });
+                if (res.ok) {
+                  const saved = await res.json();
+                  setSunsetSettings(saved);
+                  setSunsetDataMap({});
+                  showToast('日没設定を保存しました（Googleスプレッドシートに反映）');
+                } else {
+                  showToast('設定の保存に失敗しました');
+                }
+              } catch (err) {
+                console.error(err);
+                showToast('通信エラーが発生しました');
+              }
+            }}>
+              <div className="form-group">
+                <label className="form-label">基準場所名称</label>
+                <input
+                  type="text"
+                  className="form-input"
+                  required
+                  placeholder="例: 福岡市南区桧原（テニスコート）"
+                  value={sunsetForm.locationName}
+                  onChange={(e) => setSunsetForm((prev) => ({ ...prev, locationName: e.target.value }))}
+                />
+              </div>
+
+              <div className="form-row">
+                <div className="form-group">
+                  <label className="form-label">緯度 (Latitude)</label>
+                  <input
+                    type="number"
+                    step="any"
+                    className="form-input"
+                    required
+                    placeholder="例: 33.54"
+                    value={sunsetForm.latitude}
+                    onChange={(e) => setSunsetForm((prev) => ({ ...prev, latitude: e.target.value }))}
+                  />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">経度 (Longitude)</label>
+                  <input
+                    type="number"
+                    step="any"
+                    className="form-input"
+                    required
+                    placeholder="例: 130.395"
+                    value={sunsetForm.longitude}
+                    onChange={(e) => setSunsetForm((prev) => ({ ...prev, longitude: e.target.value }))}
+                  />
+                </div>
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">表示する時刻の基準</label>
+                <select
+                  className="form-select"
+                  value={sunsetForm.twilightType}
+                  onChange={(e) => setSunsetForm((prev) => ({ ...prev, twilightType: e.target.value as any }))}
+                >
+                  <option value="civil">市民薄明終了時刻（屋外運動で暗さを感じ始める目安 / おすすめ）</option>
+                  <option value="sunset">日の入り時刻（太陽が地平線下に隠れる時刻）</option>
+                  <option value="nautical">航海薄明終了時刻（かなり暗くなる時刻）</option>
+                  <option value="astronomical">天文薄明終了時刻（完全に暗くなる時刻）</option>
+                </select>
+              </div>
+
+              <button type="submit" className="btn btn-primary" style={{ marginTop: '0.75rem' }}>
+                日没設定を保存する
+              </button>
+            </form>
           </div>
         </section>
       )}
