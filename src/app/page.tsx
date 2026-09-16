@@ -1111,34 +1111,29 @@ export default function Home() {
                       key={idx}
                       onClick={() => setSelectedDateStr(dayStr)}
                       className={`calendar-day ${isCurrentMonth ? '' : 'outside'} ${isSelected ? 'selected' : ''} ${isToday ? 'today' : ''}`}
+                      style={{ display: 'flex', flexDirection: 'column', minHeight: '62px' }}
                     >
+                      {/* 1. 日付 */}
                       <span className="day-number" style={{ textAlign: 'center', fontSize: '0.85rem' }}>
                         {day.getDate()}
                       </span>
-                      {sunsetSettings.showOnCalendar && (dayReservations.some((r) => r.status !== 'cancelled') || isSelected) && sunsetDataMap[dayStr] && (
-                        <div
-                          title={`日没・薄明時刻 (${sunsetSettings.locationName})`}
-                          style={{
-                            fontSize: '0.72rem',
-                            color: '#f59e0b',
-                            marginTop: '2px',
-                            textAlign: 'center',
-                            fontWeight: 600,
-                            whiteSpace: 'nowrap',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            gap: '2px',
-                          }}
-                        >
-                          <span>🌅</span>
-                          <span>{sunsetDataMap[dayStr]}</span>
-                        </div>
-                      )}
+
+                      {/* 2. 予約情報（ドット表記 / フルネーム表記） */}
                       {dayReservations.length > 0 && (
                         sunsetSettings.showOnCalendar ? (
-                          /* 日没表示ON時: 縦幅変化を防ぐ簡略表現（名前ではなくステータスカラーのドット●で表示） */
-                          <div style={{ display: 'flex', gap: '3px', justifyContent: 'center', alignItems: 'center', marginTop: '4px', flexWrap: 'wrap' }}>
+                          /* 日没表示ON時: セル高さを壊さないコンパクトな●ドット表示 */
+                          <div style={{
+                            display: 'flex',
+                            gap: '2px',
+                            justifyContent: 'center',
+                            alignItems: 'center',
+                            marginTop: '2px',
+                            marginBottom: '2px',
+                            flexWrap: 'wrap',
+                            maxWidth: '100%',
+                            maxHeight: '1.5em',
+                            overflow: 'hidden',
+                          }}>
                             {dayReservations.map((r) => {
                               const isCancelled = r.status === 'cancelled';
                               const isSettled = r.settlementStatus === '精算済' || r.settlementStatus === '返金済';
@@ -1149,15 +1144,16 @@ export default function Home() {
                                   key={r.id}
                                   className={`day-reserver-name ${statusClass}`}
                                   style={{
-                                    fontSize: '0.75rem',
+                                    fontSize: '0.55rem',
                                     lineHeight: 1,
-                                    padding: '0 1px',
+                                    padding: 0,
                                     borderRadius: '50%',
                                     textDecoration: isCancelled ? 'line-through' : 'none',
                                     opacity: isCancelled ? 0.35 : 1,
                                     background: 'transparent',
                                     border: 'none',
                                     margin: 0,
+                                    display: 'inline-block',
                                   }}
                                   title={`${isCancelled ? '（消）' : ''}${r.reserverName} (${r.facilityName} ${r.courtStartTime}〜)`}
                                 >
@@ -1189,6 +1185,29 @@ export default function Home() {
                             })}
                           </div>
                         )
+                      )}
+
+                      {/* 3. 日没時間（最下部に統一配置） */}
+                      {sunsetSettings.showOnCalendar && (dayReservations.some((r) => r.status !== 'cancelled') || isSelected) && sunsetDataMap[dayStr] && (
+                        <div
+                          title={`日没・薄明時刻 (${sunsetSettings.locationName})`}
+                          style={{
+                            fontSize: '0.7rem',
+                            color: '#f59e0b',
+                            marginTop: 'auto',
+                            paddingTop: '2px',
+                            textAlign: 'center',
+                            fontWeight: 600,
+                            whiteSpace: 'nowrap',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            gap: '2px',
+                          }}
+                        >
+                          <span>🌅</span>
+                          <span>{sunsetDataMap[dayStr]}</span>
+                        </div>
                       )}
                     </div>
                   );
