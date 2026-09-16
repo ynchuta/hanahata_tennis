@@ -113,6 +113,7 @@ export default function Home() {
     longitude: 130.395,
     twilightType: 'civil',
   });
+  const [isSunsetSettingsLoaded, setIsSunsetSettingsLoaded] = useState(false);
   const [sunsetDataMap, setSunsetDataMap] = useState<Record<string, string>>({});
   const [sunsetForm, setSunsetForm] = useState({
     showOnCalendar: true,
@@ -221,6 +222,8 @@ export default function Home() {
       }
     } catch (e) {
       console.error('Failed to fetch sunset settings:', e);
+    } finally {
+      setIsSunsetSettingsLoaded(true);
     }
   }, []);
 
@@ -278,7 +281,7 @@ export default function Home() {
 
   // カレンダーの表示月や予約・選択日の変化に合わせて日没時刻を一括取得
   useEffect(() => {
-    if (!isLoggedIn) return;
+    if (!isLoggedIn || !isSunsetSettingsLoaded || !sunsetSettings.showOnCalendar) return;
     const days = getDaysInMonth(currentDate);
     const dateStrs = days.map(toLocalDateStr);
 
@@ -295,7 +298,7 @@ export default function Home() {
     if (datesToFetch.length > 0) {
       fetchSunsets(datesToFetch, sunsetSettings);
     }
-  }, [currentDate, reservations, selectedDateStr, isLoggedIn, sunsetSettings, sunsetDataMap, fetchSunsets]);
+  }, [currentDate, reservations, selectedDateStr, isLoggedIn, isSunsetSettingsLoaded, sunsetSettings, sunsetDataMap, fetchSunsets]);
 
   // カレンダーの月（currentDate）と集計レポートの対象月（reportMonth）を連動させる
   useEffect(() => {
@@ -1105,6 +1108,7 @@ export default function Home() {
                   const isSelected = dayStr === selectedDateStr;
                   const isToday = dayStr === toLocalDateStr(new Date());
                   const dayReservations = getReservationsForDate(dayStr);
+                  const showSunset = isSunsetSettingsLoaded && sunsetSettings.showOnCalendar;
 
                   return (
                     <div
@@ -1120,7 +1124,7 @@ export default function Home() {
 
                       {/* 2. 予約情報（日付の直下に固定配置） */}
                       {dayReservations.length > 0 && (
-                        sunsetSettings.showOnCalendar ? (
+                        showSunset ? (
                           /* 日没表示ON時: 日付の直下に固定配置（下に張り付かないよう marginTop: 3px） */
                           <div style={{
                             display: 'flex',
@@ -1186,8 +1190,8 @@ export default function Home() {
                         )
                       )}
 
-                      {/* 3. 日没時間エリア（表示ON時は領域を固定確保し、ドットが上に押し上げられる位置ズレを防ぐ） */}
-                      {sunsetSettings.showOnCalendar && (
+                      {/* 3. 日没時間エリア（表示ON時かつ読み込み完了時は領域を固定確保し、ドットが上に押し上げられる位置ズレを防ぐ） */}
+                      {showSunset && (
                         <div style={{ marginTop: 'auto', minHeight: '1.2rem', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                           {(dayReservations.some((r) => r.status !== 'cancelled') || isSelected) && sunsetDataMap[dayStr] && (
                             <div
