@@ -118,6 +118,7 @@ export default function Home() {
     longitude: '130.395',
     twilightType: 'civil' as 'sunset' | 'civil' | 'nautical' | 'astronomical',
   });
+  const [showSunset, setShowSunset] = useState(true);
 
   const showToast = useCallback((message: string, duration = 3000, loading = false) => {
     setToast({ message, show: true, loading });
@@ -1082,11 +1083,40 @@ export default function Home() {
         <section>
           <div className="card">
             <div className="calendar">
-              <div className="calendar-header">
+              <div className="calendar-header" style={{ position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                 <button className="calendar-nav-btn" onClick={() => changeMonth(-1)}>&lt; 前月</button>
-                <h2 className="calendar-month-title">
-                  {currentDate.getFullYear()}年 {currentDate.getMonth() + 1}月
-                </h2>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', position: 'absolute', left: '50%', transform: 'translateX(-50%)', whiteSpace: 'nowrap' }}>
+                  <h2 className="calendar-month-title" style={{ margin: 0 }}>
+                    {currentDate.getFullYear()}年 {currentDate.getMonth() + 1}月
+                  </h2>
+                  <label
+                    title="日没時刻の表示ON/OFF"
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '0.25rem',
+                      cursor: 'pointer',
+                      fontSize: '0.78rem',
+                      color: showSunset ? '#f59e0b' : 'var(--color-text-muted)',
+                      background: showSunset ? 'rgba(245, 158, 11, 0.12)' : 'rgba(255, 255, 255, 0.05)',
+                      border: `1px solid ${showSunset ? 'rgba(245, 158, 11, 0.35)' : 'rgba(255, 255, 255, 0.1)'}`,
+                      padding: '2px 8px',
+                      borderRadius: '12px',
+                      userSelect: 'none',
+                      transition: 'all 0.2s ease',
+                    }}
+                  >
+                    <span>🌅</span>
+                    <input
+                      type="checkbox"
+                      checked={showSunset}
+                      onChange={(e) => setShowSunset(e.target.checked)}
+                      style={{ cursor: 'pointer', accentColor: '#f59e0b' }}
+                    />
+                  </label>
+                </div>
+
                 <button className="calendar-nav-btn" onClick={() => changeMonth(1)}>翌月 &gt;</button>
               </div>
 
@@ -1111,7 +1141,7 @@ export default function Home() {
                       <span className="day-number" style={{ textAlign: 'center', fontSize: '0.85rem' }}>
                         {day.getDate()}
                       </span>
-                      {(dayReservations.some((r) => r.status !== 'cancelled') || isSelected) && sunsetDataMap[dayStr] && (
+                      {showSunset && (dayReservations.some((r) => r.status !== 'cancelled') || isSelected) && sunsetDataMap[dayStr] && (
                         <div
                           title={`日没・薄明時刻 (${sunsetSettings.locationName})`}
                           style={{
@@ -1132,26 +1162,59 @@ export default function Home() {
                         </div>
                       )}
                       {dayReservations.length > 0 && (
-                        <div className="day-reserver-list">
-                          {dayReservations.map((r) => {
-                            const isCancelled = r.status === 'cancelled';
-                            const isSettled = r.settlementStatus === '精算済' || r.settlementStatus === '返金済';
-                            const isCounter = r.settlementStatus === '窓口精算';
-                            const statusClass = isCounter ? 'counter' : (isSettled ? 'settled' : 'unsettled');
-                            return (
-                              <div
-                                key={r.id}
-                                className={`day-reserver-name ${statusClass}`}
-                                style={{
-                                  textDecoration: isCancelled ? 'line-through' : 'none',
-                                  opacity: isCancelled ? 0.45 : 1,
-                                }}
-                              >
-                                {isCancelled ? '（消）' : ''}{r.reserverName}
-                              </div>
-                            );
-                          })}
-                        </div>
+                        showSunset ? (
+                          /* 日没表示ON時: 縦幅変化を防ぐ簡略表現（名前ではなくステータスカラーのドット●で表示） */
+                          <div style={{ display: 'flex', gap: '3px', justifyContent: 'center', alignItems: 'center', marginTop: '4px', flexWrap: 'wrap' }}>
+                            {dayReservations.map((r) => {
+                              const isCancelled = r.status === 'cancelled';
+                              const isSettled = r.settlementStatus === '精算済' || r.settlementStatus === '返金済';
+                              const isCounter = r.settlementStatus === '窓口精算';
+                              const statusClass = isCounter ? 'counter' : (isSettled ? 'settled' : 'unsettled');
+                              return (
+                                <span
+                                  key={r.id}
+                                  className={`day-reserver-name ${statusClass}`}
+                                  style={{
+                                    fontSize: '0.75rem',
+                                    lineHeight: 1,
+                                    padding: '0 1px',
+                                    borderRadius: '50%',
+                                    textDecoration: isCancelled ? 'line-through' : 'none',
+                                    opacity: isCancelled ? 0.35 : 1,
+                                    background: 'transparent',
+                                    border: 'none',
+                                    margin: 0,
+                                  }}
+                                  title={`${isCancelled ? '（消）' : ''}${r.reserverName} (${r.facilityName} ${r.courtStartTime}〜)`}
+                                >
+                                  ●
+                                </span>
+                              );
+                            })}
+                          </div>
+                        ) : (
+                          /* 日没表示OFF時: 従来の名前リスト表示 */
+                          <div className="day-reserver-list">
+                            {dayReservations.map((r) => {
+                              const isCancelled = r.status === 'cancelled';
+                              const isSettled = r.settlementStatus === '精算済' || r.settlementStatus === '返金済';
+                              const isCounter = r.settlementStatus === '窓口精算';
+                              const statusClass = isCounter ? 'counter' : (isSettled ? 'settled' : 'unsettled');
+                              return (
+                                <div
+                                  key={r.id}
+                                  className={`day-reserver-name ${statusClass}`}
+                                  style={{
+                                    textDecoration: isCancelled ? 'line-through' : 'none',
+                                    opacity: isCancelled ? 0.45 : 1,
+                                  }}
+                                >
+                                  {isCancelled ? '（消）' : ''}{r.reserverName}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )
                       )}
                     </div>
                   );
