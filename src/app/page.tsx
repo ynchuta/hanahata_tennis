@@ -2629,7 +2629,29 @@ export default function Home() {
                       <input
                         type="checkbox"
                         checked={sunsetForm.showOnCalendar}
-                        onChange={(e) => setSunsetForm((prev) => ({ ...prev, showOnCalendar: e.target.checked }))}
+                        onChange={async (e) => {
+                          const nextVal = e.target.checked;
+                          setSunsetForm((prev) => ({ ...prev, showOnCalendar: nextVal }));
+                          setSunsetSettings((prev) => ({ ...prev, showOnCalendar: nextVal }));
+                          try {
+                            const lat = parseFloat(sunsetForm.latitude);
+                            const lng = parseFloat(sunsetForm.longitude);
+                            await fetch('/api/sunset-settings', {
+                              method: 'POST',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({
+                                showOnCalendar: nextVal,
+                                locationName: sunsetForm.locationName,
+                                latitude: isNaN(lat) ? 33.54 : lat,
+                                longitude: isNaN(lng) ? 130.395 : lng,
+                                twilightType: sunsetForm.twilightType,
+                              }),
+                            });
+                            showToast(nextVal ? '日没時刻の表示をONにしました（即時反映）' : '日没時刻の表示をOFFにしました（即時反映）');
+                          } catch (err) {
+                            console.error(err);
+                          }
+                        }}
                       />
                       <span className="slider"></span>
                     </label>
