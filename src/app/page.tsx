@@ -1090,31 +1090,17 @@ export default function Home() {
                   <h2 className="calendar-month-title" style={{ margin: 0 }}>
                     {currentDate.getFullYear()}年 {currentDate.getMonth() + 1}月
                   </h2>
-                  <label
-                    title="日没時刻の表示ON/OFF"
-                    style={{
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: '0.25rem',
-                      cursor: 'pointer',
-                      fontSize: '0.78rem',
-                      color: showSunset ? '#f59e0b' : 'var(--color-text-muted)',
-                      background: showSunset ? 'rgba(245, 158, 11, 0.12)' : 'rgba(255, 255, 255, 0.05)',
-                      border: `1px solid ${showSunset ? 'rgba(245, 158, 11, 0.35)' : 'rgba(255, 255, 255, 0.1)'}`,
-                      padding: '2px 8px',
-                      borderRadius: '12px',
-                      userSelect: 'none',
-                      transition: 'all 0.2s ease',
-                    }}
-                  >
-                    <span>🌅</span>
-                    <input
-                      type="checkbox"
-                      checked={showSunset}
-                      onChange={(e) => setShowSunset(e.target.checked)}
-                      style={{ cursor: 'pointer', accentColor: '#f59e0b' }}
-                    />
-                  </label>
+                  <div className="settlement-checkbox-wrapper" style={{ margin: 0, gap: '0.35rem' }} title="日没時刻の表示ON/OFF">
+                    <span style={{ fontSize: '0.9rem', lineHeight: 1 }}>🌅</span>
+                    <label className="switch">
+                      <input
+                        type="checkbox"
+                        checked={showSunset}
+                        onChange={(e) => setShowSunset(e.target.checked)}
+                      />
+                      <span className="slider"></span>
+                    </label>
+                  </div>
                 </div>
 
                 <button className="calendar-nav-btn" onClick={() => changeMonth(1)}>翌月 &gt;</button>
